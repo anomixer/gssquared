@@ -228,6 +228,15 @@ runweb.bat
   - **（2026-08-18 修正）** canvas aspect 切換改為「寬度驅動」模型：`width: min(100vw, 1288px); height: auto; aspect-ratio: 720/400`，關閉時還原 `aspect-ratio: 1288/928; width/height: ''`。這樣一來：(1) 720:400 Aspect 永遠與 canvas 同步，高度由寬度與 Aspect 推導，不會因 `height:100%` + `max-width:100%` 在窄螢幕產生扭曲；(2) 瀏覽器視窗大於設計寬 (1288px) 時，canvas 寬度上限鎖在 1288px，Second Sight 文字即為 1:1 並不會「撑开」 balloon 到整個大視窗 —— 其餘viewport 顯示 letterbox 條細。`syncSsTextCanvasAspect()` 會在切換後連續派送 `resize` (0ms / 50ms) 確保 SDL3 重新量測 canvas。
   * **驗證狀態（2026-08-18）**：底部按鈕 hover 已確認；Second Sight Text canvas 切換改為寬度驅動並鎖定最大 1288px，防止大視窗 balloon 的行為待另台機器實測。
 
+### 4.18 Select Machine hover tooltip、Web canvas 外框與本地啟動流程
+
+* **Hover tooltip 補回**：確認 native selector 會在機器卡片及 `+ New` / `Launch` / `Edit...` hover 時顯示說明；WASM 端沿用 `SystemButton` / `SelectSystem` 的 hover 描繪，並為說明文字加黑色底，避免白色 canvas 區域讓白字不可見。
+* **Web shell 外框處理**：`html`、`body`、`#app-container`、`#viewport` 與 canvas CSS 外圍固定為純黑；selector/editor render frame 另外嘗試在 logical presentation 前清除完整 output，避免 SDL letterbox / 未繪製 canvas 區域保留瀏覽器預設白色。
+* **Selector 標題位置**：Web menu bar 是畫在 canvas 內，與 native menu 位於 canvas 外不同；`Choose your retro experience` 因此調整到 menu bar 下方的設計座標。
+* **Build launcher 修正**：`buildweb.bat` 在 Windows batch 中呼叫 `emcmake` 時補上 `call`。否則 batch 會在 configure 後直接結束，後面的 clean/link 不會執行，導致 `build-web/GSSquared.html` 一直使用舊 shell。
+* **Run launcher 分工**：`runweb.bat` 不再每次啟動都重新編譯 WASM；新增 `assets/web/update_shell.py`，啟動 server 前將最新 `assets/web/shell.html` 套回既有 `build-web/GSSquared.html`，保留 Emscripten 產生的 `GSSquared.js` script tag。需要重編 C++/WASM 時才執行 `buildweb.bat`。
+* **驗證**：修正後以 `cmd.exe /c buildweb.bat` 完整執行 518 個 Ninja build steps，成功產生新版 `GSSquared.html`、`.js`、`.wasm`；`git diff --check` 通過。WASM canvas 實際外框顏色仍需瀏覽器截圖作最終確認。
+
 ### 4.17 Second Sight 最終顯示模型與 menu bar inset
 
 * **需求釐清**：SS 模式不是把 browser canvas 改成 `720x400`；WASM 應和 exe 一樣維持最大 `1288x928` 顯示 surface。`720x400` 是 Second Sight VGA 內容的原生解析度，只應在這個 surface 內等比例放大。

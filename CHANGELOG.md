@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-19
+
+### WebAssembly Selector / Development Workflow
+
+- Restored hover descriptions for machine cards and the `+ New`, `Launch`, and `Edit...` buttons in the WASM selector, with a black tooltip background so white text remains readable over canvas borders.
+- Forced the web shell, viewport, and canvas surroundings to black; selector/editor frames also clear the full output before applying SDL logical presentation. Moved `Choose your retro experience` below the in-canvas Web menu bar.
+- Fixed `buildweb.bat` by adding `call` before `emcmake`; without it, Windows batch execution stopped after configure and served stale `GSSquared.html` output.
+- Changed `runweb.bat` to serve the last completed WASM build without rebuilding every launch. Added `assets/web/update_shell.py` to refresh the generated HTML shell from `assets/web/shell.html` while preserving the Emscripten-generated `GSSquared.js` script tag.
+
 ## 2026-08-18
 
 ### WebAssembly Bug Fixes

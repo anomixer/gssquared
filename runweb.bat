@@ -1,8 +1,9 @@
 @echo off
-rem Always rebuild before serving so embedded shell.html and WASM assets are current.
-call buildweb.bat
+rem Serve the last completed WASM build. Run buildweb.bat explicitly when
+rem source or assets have changed.
+python assets/web/update_shell.py build-web
 if errorlevel 1 (
-  echo Web build failed; server was not started.
+  echo Could not update the generated web shell; run buildweb.bat first.
   exit /b 1
 )
 python assets/web/serve.py 8000 build-web

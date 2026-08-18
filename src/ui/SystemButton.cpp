@@ -67,12 +67,24 @@ void SystemButton::render() {
 
     // draw the system description
     if (is_hovering && system_config && system_config->description && system_config->description[0]) {
+        const int line_h = ctx->text_render->get_font_line_height();
+        const int text_w = ctx->text_render->string_width(system_config->description);
+        ctx->fill_rect({ctx->description_x - text_w / 2.0f - 8.0f,
+                        ctx->description_y - 4.0f,
+                        static_cast<float>(text_w + 16),
+                        static_cast<float>(line_h + 8)}, 0x000000FF);
         ctx->text_render->set_color(0xFF, 0xFF, 0xFF, 0xFF);
         ctx->text_render->render(system_config->description,
                                  static_cast<int>(ctx->description_x),
                                  static_cast<int>(ctx->description_y),
                                  TEXT_ALIGN_CENTER);
     } else if (is_hovering && system_config && system_config->name && system_config->name[0]) {
+        const int line_h = ctx->text_render->get_font_line_height();
+        const int text_w = ctx->text_render->string_width(system_config->name);
+        ctx->fill_rect({ctx->description_x - text_w / 2.0f - 8.0f,
+                        ctx->description_y - 4.0f,
+                        static_cast<float>(text_w + 16),
+                        static_cast<float>(line_h + 8)}, 0x000000FF);
         ctx->text_render->set_color(0xFF, 0xFF, 0xFF, 0xFF);
         ctx->text_render->render(system_config->name,
                                  static_cast<int>(ctx->description_x),

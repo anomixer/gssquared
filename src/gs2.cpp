@@ -116,6 +116,21 @@ static void restore_selector_logical_presentation(video_system_t *vs) {
     (void)vs;
 }
 
+static void clear_selector_output_black(video_system_t *vs) {
+    // LETTERBOX only clears the logical destination.  On Emscripten the
+    // remaining physical canvas area can retain the browser/SDL default
+    // (white), so clear the complete output while presentation is disabled.
+    SDL_SetRenderLogicalPresentation(vs->renderer, 0, 0,
+                                     SDL_LOGICAL_PRESENTATION_DISABLED);
+    SDL_SetRenderViewport(vs->renderer, nullptr);
+    SDL_SetRenderClipRect(vs->renderer, nullptr);
+    SDL_SetRenderScale(vs->renderer, 1.0f, 1.0f);
+    SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
+    SDL_RenderClear(vs->renderer);
+    SDL_SetRenderLogicalPresentation(vs->renderer, 1288, 928,
+                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+}
+
 // Defined in OSD.cpp — used here where osd is accessible for menu-triggered disk toggle
 void handle_disk_toggle(computer_t *computer, OSD *osd, storage_key_t key);
 
@@ -1546,10 +1561,14 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             state->select_system->mark_dirty();
         }
         if (state->select_system->update()) {
-            SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
-            vs->clear();
+            clear_selector_output_black(vs);
             state->select_system->render();
             render_menu_overlay_over_logical_ui(vs);
+            // ImGui/menu rendering may leave the renderer draw color white.
+            // SDL uses the current draw color for logical-presentation
+            // letterbox bars during Present(), so restore black before the
+            // frame is presented.
+            SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
             vs->present();
             // SDL draws LETTERBOX borders during Present(). Restore the
             // selector presentation only after the menu frame is on screen,
@@ -1610,10 +1629,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             state->edit_system->mark_dirty();
         }
         if (state->edit_system->update()) {
-            SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
-            vs->clear();
+            clear_selector_output_black(vs);
             state->edit_system->render();
             render_menu_overlay_over_logical_ui(vs);
+            SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
             vs->present();
             restore_selector_logical_presentation(vs);
         }

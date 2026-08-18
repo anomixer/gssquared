@@ -295,7 +295,10 @@ void SelectSystem::render() {
         }
 
         text_renderer->set_color(255,255,255,255);
-        text_renderer->render("Choose your retro experience", (design_width / 2), 20, TEXT_ALIGN_CENTER);
+        // The Web shell draws the SDL menu bar inside the canvas; leave space
+        // below it.  Native builds have the menu outside the content area, but
+        // this position is correct for both presentations.
+        text_renderer->render("Choose your retro experience", (design_width / 2), 36, TEXT_ALIGN_CENTER);
 
         // Same footer position as SystemButton config descriptions.
         const char *hint = nullptr;
@@ -307,6 +310,12 @@ void SelectSystem::render() {
             hint = "Open an existing config file to edit";
         }
         if (hint) {
+            const int line_h = text_renderer->get_font_line_height();
+            const int text_w = text_renderer->string_width(hint);
+            ui_ctx.fill_rect({ui_ctx.description_x - text_w / 2.0f - 8.0f,
+                              ui_ctx.description_y - 4.0f,
+                              static_cast<float>(text_w + 16),
+                              static_cast<float>(line_h + 8)}, 0x000000FF);
             text_renderer->set_color(0xFF, 0xFF, 0xFF, 0xFF);
             text_renderer->render(hint,
                                   static_cast<int>(ui_ctx.description_x),
