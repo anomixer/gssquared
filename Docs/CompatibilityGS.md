@@ -1,0 +1,326 @@
+# Compatibility - GS
+
+## ProDOS 2.4
+
+ProDOS 2.4 crashes at FF/2028.  2.4.3 slightly different address. I think this may now be resolved. Do more testing.
+
+## Merlin-16
+
+crashes after displaying MERLIN-16 splash screen, in FF/somethingorother.
+Merlin-16 is booting now!!!! (LC Bank 1 fix)
+
+## AppleWorks 4.3
+
+crashes during ProDOS boot - likely same issue as ProDOS 2.4 above.
+ah ha! Works now after I fixed the issue with ALTZP not switching in LC Bank 1.
+
+## Thexder
+
+Thexder hangs part way through boot. it uses AUX and LC heavily.  
+Thexder on Total Replay loads and runs.
+It seems to want to run only out of slot 6.
+
+## ProDOS 8 1.1.1
+
+crashes during boot, likely due to some MMU problem.  
+THIS HAS BEEN FIXED. ProDOS 1.1.1 User's disk now booting on both 5.25 and 3.5.
+
+## Apple Panic
+
+Apple Panic is not clearing c010?? that is some wacky stuff. Issue here is that the keyboard buffer is always "enabled". 
+
+On a real GS, if we read C000 w/o clearing strobe, it does change as we type characters. in GS2, it does not, because I didn't write it that way.
+
+So what the hell does the GS do? ah ha!!! By default, GS has keyboard buffering DISABLED. When I ENABLE it, it behaves the same as GS2. So I need to respect the "buffer yes/no" bit and do the right thing.
+
+GS now respects "buffer disable/enable" modes_byte flags and this now works correctly.
+
+## Taxman
+
+TAXMAN loads switches to text page 2 and I got no other display..  hit reset, and then it starts working.. ?  ctrl-c switches back to text page 2. huh..  WE'RE NOT SHADOWING PAGE 2, HA HA  
+
+So this works, according to ROM01 where text page 2 doesn't work.
+
+## System 6.0.3
+
+System 6.0.3 Install disk crashes into monitor after doing a bunch of stuff. BUT it does throw up the GS/OS boot shr screen!
+
+Booting pretty reliably now.
+
+## AppleWorks 1.3
+
+works.
+
+## MDT (multi display test)
+
+seems to work all video modes
+
+## Bard's Tale II: Destiny Knight
+
+My recollection is this worked ok. Well something was working somewhere, because I walked around a town, however, it is decidedly not working now. It's doing weird disk stuff then going kablooey.
+
+## Bard's Tale I
+
+boots to "NO SMARTPORT" error. Doesn't like running off the hard disk.
+After Woz3.5 support, now boots to initial screen! But crashes with RESTART SYSTEM (Ensoniq interrupt problem).
+
+plays at correct tempo now, but if you skip the intro song and text, dies with Unclaimed Sound Interrupt.
+
+## Christmas Music (Christmas.2mg)
+
+Error: 13 (from PlayMidiStartup).
+2/18/26: the midi tool is now starting, and playing a song.. way too slowly, just like QiX. Still, this is a big improvement over crashing.
+
+with ensoniq interrupt fix... runs and plays correctly. mostly. the second song sounds out of tune. not sure if it's on purpose? Guess I can try it in KEGaroo. OK it's the same off-key stuff in KEGS. 
+
+## FTA XMAS Demo (FTAXMAS)
+
+immediately hits BRK at 5300 after loading boot block. I read this loads stuff from disk while animations are occurring, so this may depend on directly manipulating the IWM.
+
+with WOZ 3.5 support and ensoniq interrupt fix, playing pretty well.
+
+there is a slight cycle timing defect where it does not seem to want to draw in the very lower right corner of the border. (so, several cycles worth of border at the very end is wrong). Is there latency in changing the border color?
+
+## A2Desktop 1.5
+
+crashes with progress bar halfway
+it's done a ProDOS call to BF00 -> DE00 to find the prodos routine overwritten.
+Test correct behavior of:
+ALTZP with LC enabled
+
+A couple issues:
+when ALTZP is set (well, any aux memory really), if we do a direct read of 1'0000, then we get data from bank 2! We're indiscriminately adding another 1'0000 to the 1'0000.
+When, if the lo bit of bank is 1, we should not do that. (Is this that bank latch business?)
+
+ok, ZP switches back and forth correctly page 0 anyway. However, it does NOT switch the LC bank space.
+
+bank_shadow_read first checks LC - and subtracts 0x1000. Then that modified address is run through the aux thing. Except it's page C0-CF and that doesn't match D0-DF.
+
+Oddly, double hires seems to not be working correctly. I only get every other byte-column on the screen. Other double hires stuff is working (Arkanoid, skull island splash). 
+
+Now supports C029 mono mode in rgb (and composite) rendering.
+
+WORKING SUPER DUPER PERFECTO
+
+The text editor/viewer crashes, there is likely some issue with AUX/MAIN bank switching still.
+
+With Floppies enabled, hangs forever trying to read floppies.
+
+## Arkanoid
+
+Crashes during boot.
+It's executing from E0/D100 page, does 00 => C068, and then the code disappears out from under it and hits a BRK.
+
+Indeed, the code they're expecting is switched in if I hit c08b c08b. and 0 => C068 definitely turns OFF LC Bank 1. 
+Is there even supposed to be a LC in banks E0/E1 ?
+
+It now boots and plays (without sound!!) IT IS HAPPENING!!
+
+IT NOW PLAYS WITH SOUND!!!!! IT HAS HAPPENED!!
+
+## Airball
+
+same crash location as Arkanoid. 
+After fixing State/C068/LCBNK2 was incorrect, we now boot to finder!
+
+The mouse isn't moving, probably because interrupts are not hooked up yet.
+
+you can select some things in the UI via keyboard, but joystick is not responding.
+
+WORKS NOW, joystick and keyboard controls. I wonder if this hits the joystick from E1. 
+
+## Apple IIgs Tour
+
+boots past a "loading" screen, but then is looping doing ??
+
+Working now.
+
+## Apple IIgs Dealer Demo
+
+boots to "Demo Configuration";
+asks for volume; 
+tries to load stuff off slot 6 for a while then crashes. is likely expecting IWM in slot 5.
+
+Even with WOZ 3.5 it's dying looking for a disk over and over. Weird.
+
+ah, you have to load both disks in the set when you boot it up. With the latest DOC fixes (7-16-26) is now good to go.
+
+## Qix
+
+sometimes we have a crash booting GS/OS, and then a reboot, and it works.
+This feels like there is a s/s not being set correctly on powerup or reset.
+At splash screen hangs in tight loop waiting for 1D00 to be non-zero. It's waiting for an interrupt handler to set a variable.
+it's just slow. The music is playing like 8 times too slow. Weeeird.
+
+with ensoniq interrupt fix, runs and plays correctly! Music and sound effects at correct rate. 
+
+## Rastan
+
+gets a little further now, you can start the game, but the game screen draws as the guy falls on the left, eventually screen blacks and audio keeps repeating in a loop. Getting closer!
+Likely a Ensoniq issue.
+
+with esoniq interrupt fix, runs and plays correctly!
+
+there are a couple places however where a sound effect sounds like noise. Unsure if that's intentional (probably not)
+
+## Gauntlet
+
+Boots - however joystick won't go right or down, only up or left. I believe the timing is wrong. ?pdl(0) in basic works, but, it is slowing down the CPU to read the value. 
+
+## System 6.0.3 Installer
+
+This now boots to the installer! (there may be that "doesn't boot on a first load" issue?)
+
+## Airheart (standalone SANS Crack)
+
+so, this  but then crashes after trying to calculate a slot offset from $2B. $2B in some docs says "boot slot * 16". we lsr that four times. ok fine.
+Except when this code runs $2B just contains 7. 7 is right slot but in wrong place. 
+Well, funnily enough, this is a 143K disk, not an 800K disk. So I bet its bootloader is just doing the wrong thing because it's expecting a 5.25.
+Boots most of the way on GS but then fails in a tight loop reading C0EC (at D27F, prodos?)
+Interestingly, same media boots and plays fine on //e.
+
+## Donkey Kong
+
+Plays very well with keyboard. (It does not support joystick) Does support SNESMAX for gamepads, so look into adding this in the future.
+
+## NoiseTracker
+
+there was a MMU bug involving RAMRD/RAMWRT and direct access to bank 1. (we were adding an extra 0x1'0000 erroneously).
+It now starts but then hits a BRK; it plays music for a while; then dies with a "RESTART SYSTEM". Could be Ensoniq IRQ or another memory issue.
+2/18/26: gets a little further now before crashing, it displays a 3d Ball pyramid.
+7/16/26: working well with latest round of Ensoniq fixes.
+
+## Senseiplay
+
+similar to noisetracker, now starts and plays a song for a couple seconds, then fails with a "RESTART SYSTEM-$01".
+
+with ensoniq interrupt fix, Does not trigger RESTART SYSTEM 01 but does not play songs correctly.
+
+Now working correctly with latest ensoniq fixes.
+
+## Telcom 0.28 (1991)
+
+my baby!
+
+this crashes to a BRK on GS2. It does NOT crash on Kegs. Something is doing a tool call 2403 to call 00/C2CC in emulation mode. (Why?) This routine exits with a JMP $4xxx, meaning, it's expecting the program bank to be FF, not 00. So something in that stretch between 14/6360 (can't guarantee it's always here, but, it's the JSL $E10000 before the BRK).
+
+^^ This likely points to an MMU bug?
+
+YES. See DevelopLog.md Feb 18 2026. 
+
+Telcom now runs. (Issue was IO space wasn't being mapped into bank E1 correctly).
+
+## DreamGrafx (from Golden Orchard)
+
+This appears to work nicely even in SBC 3200 mode (full 3200 colors while editing).
+
+However, the associated DreamVoir program crashes with a BRK 00/0000 after its splash screen.
+A different DreamVoir (from What Is the Apple IIgs?) loads up just fine.
+
+## Total Replay
+
+### Airheart
+
+crashes after displaying splash screen (same as on IIe)
+Now working. This is a known bug in TR. I updated pdblock2 to pdblock3 (which supports prodos and smartport standard) and it now works!!
+
+# What Is the Apple IIgs: Launcher
+
+The demos on here are great because they load under normal ProDOS and that gets around my lack of 3.5 ..
+
+## F: Demos
+
+### Happy Friday
+
+Seems to work fine. Has some border-based cycle-counting effecs that look (mostly) correct. 
+
+### Kernkompetenz
+
+takes a bit to load up, but starts. Ran for a long while (prefers to be accelerated) but then eventually succumbed to RESTART SYSTEM 01.
+Uses fill mode, which we haven't implemented yet.
+OK fine, I implemented fill, only took 20 minutes, but this still crashes.
+
+with ensoniq interrupt fix, runs mostly correctly! There are two segments where it gets bogged down. but no longer crashes with RESTART SYSTEM 01. 
+
+### No Hard Feelings
+
+Also desperately wants fill mode. Also implemented. What a great demo.
+
+### Plasma
+
+crashes on start with sound interrupt stutter issue like Rastan has. Very similar to Plasmagoria. It's working this time though.. 
+
+with ensoniq interrupt fix, seems to run correctly.
+
+### Lower Planes
+
+ok this is doing border effects, which are working correctly EXCEPT - the right border is offset, everything is too low. by 1 (maybe 2) scanlines.
+
+### Photonix
+
+it's slamming the disk drives trying to do direct 3.5" stuff. "Non bootable disk" over and over. Whack.
+
+### Megademo
+
+causes a segfault! Whoo, that's entertaining. The mask for "oscillators enabled" in ensoniq was 0x3F, when it should have been 0x1F. Boots up to the menu now but then is non-responsive.
+
+there are some defects in the initial screen where fillmode lines don't seem to be getting set correctly.
+
+### Modulae
+
+Causes a segfault also! Same problem as above, now starts up.. plays music and rotates text. click button to get past the start screen.
+Seems to run pretty well now, though at one point when the 3D engine gets busy, the mouse maybe doesn't respond well? Not sure how many of those controls are supposed to work..
+all the controls work, the mouse is just a little sluggish sometimes. 
+
+### Nucleus
+
+interrupt issues. Also, after it spazzes out, even RESET isn't turning off some VGC interrupts.
+
+with ensoniq interrupt fix, it's not crashing out any more. however, there are artifacts on the main instruments (instr other than the bass). Probably similar to what's happening in Sales Demo. 
+
+### Apple IIgs Sales Demo
+
+with ensoniq interrupt fix, now is running correctly mostly. the intro jazz music is good. 
+
+After 7/16/26, the digitized speech playback "Introducing the Apple IIgs" is now working.
+
+### Revenge of the Bobs
+
+Coredump! I didn't have the 2nd disk mounted, sadly did not replicate.
+Boots, starts to run, wants accelerated mode, but then dies with SYSTEM ERROR 01
+
+with ensoniq interrupt fix, now runs correctly.
+
+### Shoddy Demo
+
+starts to load, hits a BRK.
+
+with ensoniq interrupt fix, now runs correctly.
+
+### Airforce Demo
+
+Doesn't do much, but what it does, works
+
+### GS Underground: Demo 2
+
+
+### Zavtra I / II
+
+these both worked
+
+### Wolfenstein 3D
+
+This crashes on startup. Why?
+POLL FDB DEVICE - unimplemented
+interesting!
+WORKING!!! Implemented improvements to ADB emulation to support what w3d wanted.
+
+with ensoniq interrupt fix, intro music and game sound effects play correctly now.
+
+**PLAYS LIKE A CHAMP**
+
+### Zany Golf
+
+Works right up until you are actually playing a level, then the screen is black where level should be. Say wha.
+
+Retested after IIgs fast-RAM sizing (FPI 23-bit cap, banks `$00`–`$7F` on ROM01/ROM03): still black playfield with HUD + music. Blit LocInfo at DP `$0C28+` can hold long-pointer junk in the Y/rows fields, so the mask blit reads nonsense banks; not fixed by RAM size alone.

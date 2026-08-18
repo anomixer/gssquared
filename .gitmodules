@@ -1,0 +1,18 @@
+[submodule "vendored/SDL"]
+	path = vendored/SDL
+	url = https://github.com/libsdl-org/SDL.git
+[submodule "vendored/SDL_image"]
+	path = vendored/SDL_image
+	url = https://github.com/libsdl-org/SDL_image.git
+[submodule "vendored/SDL_ttf"]
+	path = vendored/SDL_ttf
+	url = https://github.com/libsdl-org/SDL_ttf.git
+[submodule "vendored/fmt"]
+	path = vendored/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "vendored/SDL_net"]
+	path = vendored/SDL_net
+	url = https://github.com/libsdl-org/SDL_net.git
+[submodule "vendored/libslirp"]
+	path = vendored/libslirp
+	url = https://gitlab.com/qemu-project/libslirp.git

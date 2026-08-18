@@ -1,0 +1,1346 @@
+cmake_minimum_required(VERSION 3.10)
+
+# Prefer Clang over GCC on Linux/Mac. Must happen before project() so CMake
+# hasn't already detected and cached the default system compiler.
+# Skip entirely when a toolchain file is in use (e.g. Emscripten via emcmake),
+# otherwise we'd FORCE the host clang into the cache ahead of emcc.
+if(NOT WIN32 AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    find_program(CLANG_EXECUTABLE NAMES clang)
+    find_program(CLANGPP_EXECUTABLE NAMES clang++)
+
+    if(CLANG_EXECUTABLE AND CLANGPP_EXECUTABLE)
+        if(NOT CMAKE_C_COMPILER)
+            set(CMAKE_C_COMPILER "${CLANG_EXECUTABLE}" CACHE FILEPATH "C compiler" FORCE)
+        endif()
+        if(NOT CMAKE_CXX_COMPILER)
+            set(CMAKE_CXX_COMPILER "${CLANGPP_EXECUTABLE}" CACHE FILEPATH "C++ compiler" FORCE)
+        endif()
+    else()
+        message(STATUS "Clang not found, falling back to default system compiler")
+    endif()
+endif()
+
+# Set the project name
+project(gssquared)
+
+################################################################################
+#### VERSION MANAGEMENT
+################################################################################
+
+# Define base version (major.minor)
+set(VERSION_MAJOR "0")
+set(VERSION_MINOR "10")
+
+# Get git commit count for patch version (auto-incrementing)
+find_package(Git QUIET)
+if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-list --count HEAD
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_COMMIT_COUNT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(GIT_COMMIT_COUNT)
+        set(VERSION_PATCH ${GIT_COMMIT_COUNT})
+    else()
+        set(VERSION_PATCH "0")
+    endif()
+    
+    # Also get git hash for build info
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+else()
+    set(VERSION_PATCH "0")
+    set(GIT_HASH "unknown")
+endif()
+
+# Construct full version string
+set(PROJECT_VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
+
+message(STATUS "Project version: ${PROJECT_VERSION} (git: ${GIT_HASH})")
+
+# Generate version header file
+configure_file(
+    "${PROJECT_SOURCE_DIR}/src/version.h.in"
+    "${PROJECT_BINARY_DIR}/generated/version.h"
+)
+
+# Generate Info.plist file with version information
+configure_file(
+    "${PROJECT_SOURCE_DIR}/assets/Info.plist.in"
+    "${PROJECT_BINARY_DIR}/generated/Info.plist"
+)
+
+# Accepted settings:
+# GS2_BUILD_NATIVE     Set to build (on Mac) for only the current (native) architecture. Otherwise, build for both arm64 and x86_64.
+# GS2_PROGRAM_FILES    Set to build a directory of program files (bare executable and files instead of platform-specific format).
+# GS2_BUNDLE_LIBS      Set to bundle libraries with the build.
+# CMAKE_BUILD_TYPE     Release | Debug (default: Release)
+
+if(WIN32) 
+    set(CMAKE_SYSTEM_NAME Windows)
+    set(CMAKE_SYSTEM_VERSION 10.0)
+    set(CMAKE_SYSTEM_PROCESSOR x86_64)
+endif()
+
+# Define build options and set defaults
+option(GS2_BUILD_NATIVE "Build for native architecture only" OFF)
+option(GS2_PROGRAM_FILES "Build a directory of program files (bare executable and files instead of bundle/package)" OFF)
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT GS2_PROGRAM_FILES)
+    option(GS2_BUNDLE_LIBS "Bundle library dependencies with the build" OFF)
+else()
+    set(GS2_BUNDLE_LIBS ON CACHE BOOL "Bundle library dependencies with the build" FORCE)
+endif()
+
+# Set Apple architecture globally if on Apple platform
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0")
+    if(GS2_BUILD_NATIVE)
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+            set(APPLE_ARCHITECTURE "arm64")
+        else()
+            set(APPLE_ARCHITECTURE "x86_64")
+        endif()
+    else()
+        set(APPLE_ARCHITECTURE "arm64;x86_64")
+    endif()
+    set(CMAKE_OSX_ARCHITECTURES ${APPLE_ARCHITECTURE})
+    message(STATUS "Building for architectures: ${APPLE_ARCHITECTURE}")
+endif()
+
+# Set default install prefix based on build target
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}" CACHE PATH "Default install path" FORCE)
+endif()
+
+# Set default build type to Release if not specified
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# Set default to static for our internal libraries 
+set(BUILD_SHARED_LIBS OFF)
+
+# First, create a target to assemble all resources into build/ directory.
+# Glob all asset files so Ninja can track them as real inputs. Without this,
+# add_custom_target's CUSTOM_COMMAND has no dependencies and Ninja skips it
+# after the first successful run (recorded as clean in .ninja_log), leaving
+# stale copies under build/resources/ even when source assets change.
+# CONFIGURE_DEPENDS makes CMake re-glob on each build, picking up added files.
+file(GLOB_RECURSE GS2_ASSET_FILES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/assets/roms/*"
+    "${CMAKE_SOURCE_DIR}/assets/sounds/*"
+    "${CMAKE_SOURCE_DIR}/assets/fonts/*"
+    "${CMAKE_SOURCE_DIR}/assets/shaders/*"
+    "${CMAKE_SOURCE_DIR}/assets/gs2/*"
+    "${CMAKE_SOURCE_DIR}/assets/vdisk/*"
+)
+list(APPEND GS2_ASSET_FILES
+    "${CMAKE_SOURCE_DIR}/assets/img/atlas.png"
+    "${CMAKE_SOURCE_DIR}/assets/img/gs2.icns"
+    "${CMAKE_SOURCE_DIR}/assets/img/IBM_VGA_8x16.png"
+)
+
+# Per-directory stamps: if a tree is deleted (e.g. build/resources/roms), its
+# stamp vanishes and the copy rule re-runs. A single top-level stamp alone
+# stays "up to date" even when a subdirectory is missing.
+set(GS2_RESOURCES_STAMPS
+    "${CMAKE_BINARY_DIR}/resources/roms/.assembled.stamp"
+    "${CMAKE_BINARY_DIR}/resources/sounds/.assembled.stamp"
+    "${CMAKE_BINARY_DIR}/resources/fonts/.assembled.stamp"
+    "${CMAKE_BINARY_DIR}/resources/shaders/.assembled.stamp"
+    "${CMAKE_BINARY_DIR}/resources/gs2/.assembled.stamp"
+    "${CMAKE_BINARY_DIR}/resources/img/.assembled.stamp"
+)
+
+add_custom_command(
+    OUTPUT ${GS2_RESOURCES_STAMPS}
+    # Create resources directory structure
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources/roms
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources/sounds
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources/img
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources/fonts
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources/shaders
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources/gs2
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/resources/vdisk
+
+    # Copy static resources
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/assets/img/atlas.png ${CMAKE_BINARY_DIR}/resources/img/atlas.png
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/assets/img/gs2.icns ${CMAKE_BINARY_DIR}/resources/gs2.icns
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/assets/img/IBM_VGA_8x16.png ${CMAKE_BINARY_DIR}/resources/img/IBM_VGA_8x16.png
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/roms ${CMAKE_BINARY_DIR}/resources/roms
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/sounds ${CMAKE_BINARY_DIR}/resources/sounds
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/fonts ${CMAKE_BINARY_DIR}/resources/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/shaders ${CMAKE_BINARY_DIR}/resources/shaders
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/gs2 ${CMAKE_BINARY_DIR}/resources/gs2
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/vdisk ${CMAKE_BINARY_DIR}/resources/vdisk
+
+    COMMAND ${CMAKE_COMMAND} -E touch ${GS2_RESOURCES_STAMPS}
+    DEPENDS ${GS2_ASSET_FILES}
+    COMMENT "Assembling resources into build/resources/"
+    VERBATIM
+)
+
+add_custom_target(assemble_resources ALL DEPENDS ${GS2_RESOURCES_STAMPS})
+
+function(configure_sdl_builds)
+    if(EMSCRIPTEN)
+        # Emscripten cannot build/link shared libraries; build SDL statically.
+        set(BUILD_SHARED_LIBS OFF)
+        set(SDL_SHARED OFF)
+        set(SDL_STATIC ON)
+        set(SDL_TEST OFF)
+        set(SDLIMAGE_VENDORED ON)
+        set(SDLTTF_VENDORED ON)
+        # We only need PNG (atlas / IBM_VGA font). Disable the heavy optional
+        # decoders, in particular AVIF, whose vendored dav1d does not support
+        # the wasm architecture.
+        set(SDLIMAGE_PNG ON)
+        set(SDLIMAGE_AVIF OFF)
+        set(SDLIMAGE_JXL OFF)
+        set(SDLIMAGE_TIF OFF)
+        set(SDLIMAGE_WEBP OFF)
+        set(SDLIMAGE_JPG OFF)
+        set(SDLIMAGE_BMP ON)
+    else()
+        set(BUILD_SHARED_LIBS ON)
+
+        # Force SDL to build with the correct SDK
+        if(APPLE)
+            set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Deployment target" FORCE)
+        endif()
+
+        set(SDL_SHARED ON)
+        set(SDLTTF_VENDORED ON)
+    endif()
+
+    # Force rebuild SDL with these settings
+    add_subdirectory(${CMAKE_SOURCE_DIR}/vendored/SDL)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/vendored/SDL_image)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/vendored/SDL_ttf)
+    # SDL_net has no Emscripten backend (its interface-enumeration code is a hard
+    # #error for unknown platforms). It is only used by the modem device, which
+    # we exclude from the web build, so skip building it entirely there.
+    if(NOT EMSCRIPTEN)
+        add_subdirectory(${CMAKE_SOURCE_DIR}/vendored/SDL_net)
+    endif()
+    set(BUILD_SHARED_LIBS OFF)
+endfunction()
+
+# Set output directories
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
+# Generate compile_commands.json
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Specify the C++ standard
+set(CMAKE_CXX_STANDARD 17)
+#set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+# The whole web build (SDL, the gs2_* libs, and the executable) must be compiled
+# with atomics/shared-memory enabled, otherwise wasm-ld refuses to link a
+# pthreads binary against objects built without them. Set this before any
+# targets (including the vendored SDL subdirectories) are created.
+if(EMSCRIPTEN)
+    add_compile_options(-pthread)
+    add_link_options(-pthread)
+endif()
+
+configure_sdl_builds()
+
+# SDL target names differ between the shared (native) and static (Emscripten)
+# builds. Use these variables everywhere instead of hard-coding the suffix.
+if(EMSCRIPTEN)
+    set(GS2_SDL3 SDL3::SDL3-static)
+    set(GS2_SDL3_IMAGE SDL3_image::SDL3_image-static)
+    set(GS2_SDL3_TTF SDL3_ttf::SDL3_ttf-static)
+    set(GS2_SDL3_NET "")   # SDL_net is not built for the web (see configure_sdl_builds)
+else()
+    set(GS2_SDL3 SDL3::SDL3-shared)
+    set(GS2_SDL3_IMAGE SDL3_image::SDL3_image-shared)
+    set(GS2_SDL3_TTF SDL3_ttf::SDL3_ttf-shared)
+    set(GS2_SDL3_NET SDL3_net::SDL3_net-shared)
+endif()
+
+# When CMAKE_INSTALL_PREFIX points inside the build tree, CMake's RPATH_CHECK
+# deletes the source .so before file(INSTALL) can copy it (source == destination).
+# Skipping RPATH manipulation on the vendored SDL libs avoids this: the main
+# executable already carries the correct $ORIGIN/../lib RPATH to find them.
+foreach(_sdl_lib SDL3-shared SDL3_image-shared SDL3_ttf-shared SDL3_net-shared)
+    if(TARGET ${_sdl_lib})
+        set_target_properties(${_sdl_lib} PROPERTIES SKIP_INSTALL_RPATH TRUE)
+    endif()
+endforeach()
+
+# Define flags for different build types
+#set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g3 -ggdb3 -fsanitize=address,undefined -fno-omit-frame-pointer")
+if(WIN32)
+    # Windows debug build without sanitizers
+    set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g3 -ggdb3")
+else()
+    # Non-Windows debug build with sanitizers
+    set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g3 -ggdb3 -fsanitize=address,undefined -fno-omit-frame-pointer -Werror=reorder-init-list")
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Werror=reorder-init-list")
+else()
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+endif()
+
+# When using sanitizers, we need to link with them too
+#if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT WIN32)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined")
+endif()
+
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
+
+add_library(gs2_headers INTERFACE)
+target_include_directories(gs2_headers
+    INTERFACE ${CMAKE_SOURCE_DIR}/src
+    INTERFACE ${PROJECT_BINARY_DIR}/generated
+    INTERFACE ${CMAKE_BINARY_DIR}/cfg
+)
+
+# all following targets will link to SDL3
+link_libraries(gs2_headers ${GS2_SDL3} ${GS2_SDL3_NET})
+
+add_library(gs2_devices_game src/devices/game/gamecontroller.cpp src/devices/game/mousewheel.cpp )
+
+#add_library(gs2_devices_diskii_fmt
+#    src/devices/diskii/diskii_fmt.cpp
+#    src/devices/diskii/diskii_fmt.cpp
+#)
+
+add_library(gs2_util_audio src/devices/speaker/LowPass.cpp src/devices/speaker/SpeakerX.cpp)
+
+add_library(gs2_devices_pdblock2 src/devices/pdblock2/pdblock2.cpp )
+
+add_library(gs2_devices_pdblock3 src/devices/pdblock3/pdblock3.cpp )
+
+add_library(gs2_devices_prodos_clock src/devices/prodos_clock/prodos_clock.cpp )
+
+add_library(gs2_devices_tcp    src/devices/thunderclock_plus/thunderclockplus.cpp )
+
+add_library(gs2_devices_languagecard     src/devices/languagecard/languagecard.cpp )
+
+add_library(gs2_devices_keyboard     src/devices/keyboard/keyboard.cpp )
+
+add_library(gs2_devices_speaker     src/devices/speaker/speaker.cpp )
+
+add_library(gs2_devices_memexp     src/devices/memoryexpansion/memexp.cpp )
+
+add_library(gs2_devices_parallel     src/devices/parallel/parallel.cpp )
+target_link_libraries(gs2_devices_parallel PUBLIC gs2_serial_devices)
+
+add_library(gs2_devices_videx     src/devices/videx/videx.cpp src/devices/videx/videx_80x24.cpp )
+
+add_library(gs2_devices_mockingboard     src/devices/mockingboard/mb2.cpp )
+
+# Apple Mouse III (PIA+6805 / Apple ROM). Former BazMouse sources remain under
+# src/devices/applemouseii/ but are not built.
+add_library(gs2_devices_mouse
+    src/devices/applemouseiii/applemouseiii.cpp
+    src/devices/applemouseiii/MouseController.cpp
+    src/devices/applemouseiii/PIA6520.cpp
+)
+
+add_library(gs2_devices_iiememory src/devices/iiememory/iiememory.cpp)
+
+add_library(gs2_devices_ensoniq src/devices/es5503/ensoniq.cpp src/devices/es5503/soundglu.cpp)
+
+add_library(gs2_devices_scc8530 src/devices/scc8530/scc8530.cpp)
+target_link_libraries(gs2_devices_scc8530 PUBLIC gs2_serial_devices)
+
+add_library(gs2_devices_ssc src/devices/ssc/ssc.cpp)
+target_link_libraries(gs2_devices_ssc PUBLIC gs2_serial_devices)
+
+add_library(gs2_devices_secondsight
+    src/devices/secondsight/secondsight.cpp
+    src/devices/secondsight/ss_a2_text_sync.cpp
+    src/devices/secondsight/ppu_render.cpp
+    src/devices/secondsight/vga_render_8.cpp
+    src/devices/secondsight/vga_render_16.cpp
+    src/devices/secondsight/vga_render_24.cpp
+    src/devices/secondsight/vga_render_text_9x16.cpp
+    src/devices/secondsight/vga_render_text_9x16_present.cpp
+)
+target_link_libraries(gs2_devices_secondsight PRIVATE ${GS2_SDL3_IMAGE} gs2_displaypp gs2_paths)
+
+add_library(gs2_devices_iwm src/devices/iwm/iwm_device.cpp)
+
+add_library(gs2_devices_cassette     src/devices/cassette/cassette.cpp )
+
+add_library(gs2_devices_vidhd     src/devices/vidhd/vidhd.cpp )
+
+add_library(gs2_devices_adb     src/devices/adb/keygloo.cpp )
+
+# Host FST (GSPlus / Kelvin Sherlock) — Unix/macOS/Windows; stub on Emscripten
+set(GS2_HOSTFST_SOURCES
+    src/devices/hostfst/hostfst.cpp
+    src/devices/hostfst/hostfst_engine.cpp
+)
+if(NOT EMSCRIPTEN)
+    list(APPEND GS2_HOSTFST_SOURCES
+        src/devices/hostfst/host_common.c
+    )
+    if(WIN32)
+        list(APPEND GS2_HOSTFST_SOURCES
+            src/devices/hostfst/win32_host_fst.c
+            src/devices/hostfst/win32_host_common.c
+        )
+    else()
+        list(APPEND GS2_HOSTFST_SOURCES
+            src/devices/hostfst/host_fst.c
+            src/devices/hostfst/unix_host_common.c
+        )
+    endif()
+endif()
+add_library(gs2_devices_hostfst ${GS2_HOSTFST_SOURCES})
+target_include_directories(gs2_devices_hostfst PRIVATE ${CMAKE_SOURCE_DIR}/src/devices/hostfst)
+target_link_libraries(gs2_devices_hostfst PUBLIC gs2_systemconfig gs2_paths gs2_cpu gs2_mmu)
+if(NOT EMSCRIPTEN)
+    if(WIN32)
+        set_source_files_properties(
+            src/devices/hostfst/host_common.c
+            src/devices/hostfst/win32_host_fst.c
+            src/devices/hostfst/win32_host_common.c
+            PROPERTIES LANGUAGE C
+        )
+    else()
+        set_source_files_properties(
+            src/devices/hostfst/host_fst.c
+            src/devices/hostfst/host_common.c
+            src/devices/hostfst/unix_host_common.c
+            PROPERTIES LANGUAGE C
+        )
+    endif()
+endif()
+
+# Uthernet II + libslirp (stubbed on Emscripten)
+if(NOT EMSCRIPTEN)
+    include(${CMAKE_SOURCE_DIR}/vendored/libslirp_cmake/CMakeLists.txt)
+    add_library(gs2_devices_uthernet2
+        src/devices/uthernet2/uthernet2.cpp
+        src/devices/uthernet2/w5100_chip.cpp
+        src/devices/uthernet2/net_worker.cpp
+        src/devices/uthernet2/slirp_backend.cpp
+        src/devices/uthernet2/slirp_netpick.cpp
+    )
+    target_link_libraries(gs2_devices_uthernet2 PUBLIC gs2_libslirp gs2_mmu gs2_cpu)
+    target_include_directories(gs2_devices_uthernet2 PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/devices/uthernet2
+        ${CMAKE_SOURCE_DIR}/src/devices/uthernet2/glib_compat
+    )
+else()
+    add_library(gs2_devices_uthernet2 src/devices/uthernet2/uthernet2.cpp)
+    target_compile_definitions(gs2_devices_uthernet2 PRIVATE GS2_UTHERNET2_STUB=1)
+    target_link_libraries(gs2_devices_uthernet2 PUBLIC gs2_mmu gs2_cpu)
+endif()
+
+add_library(gs2_trace src/debugger/trace.cpp src/debugger/trace_opcodes.cpp)
+
+add_library(gs2_debugger  src/debugger/debugwindow.cpp src/debugger/Monitor.cpp
+    src/debugger/MemoryWatch.cpp src/debugger/disasm.cpp
+    src/debugger/DebugProtocolServer.cpp src/debugger/BreakpointTable.cpp
+    src/debugger/DebugVideoView.cpp)
+
+add_library(gs2_mmu src/mmus/mmu.cpp src/mmus/mmu_ii.cpp src/mmus/mmu_iie.cpp src/mmus/mmu_iigs.cpp)
+
+#add_library(gs2_cpu src/cpus/cpu_6502.cpp src/cpus/cpu_65c02.cpp src/cpu.cpp )
+#add_library(gs2_cpu src/cpus/core_6502.cpp src/cpu.cpp )
+add_library(gs2_cpu src/cpu.cpp )
+
+add_library(gs2_cpu_new src/cpus/cpu_implementations.cpp src/cpus/cpu_6502.cpp src/cpus/cpu_65c02.cpp src/cpus/cpu_65816.cpp)
+
+add_library(gs2_computer src/computer.cpp )
+
+add_library(gs2_event_dispatcher src/util/EventDispatcher.cpp )
+
+add_library(gs2_serial_devices src/serial_devices/SerialDevice.cpp
+)
+add_library(gs2_util src/util/media.cpp src/util/ResourceFile.cpp src/util/dialog.cpp src/util/mount.cpp
+    src/util/Connections.cpp
+    #src/util/soundeffects.cpp 
+    src/util/SoundEffect.cpp
+    src/util/EventQueue.cpp src/util/Event.cpp src/util/EventTimer.cpp src/util/TextRenderer.cpp
+    src/util/HexDecode.cpp src/util/DeviceFrameDispatcher.cpp src/util/Metrics.cpp
+    src/util/MenuInterface.cpp)
+
+add_library(gs2_ui src/ui/AssetAtlas.cpp src/ui/Container.cpp src/ui/DiskII_Button.cpp src/ui/AppleDisk_525_Button.cpp src/ui/AppleDisk_35_Button.cpp src/ui/Unidisk_Button.cpp
+    src/ui/MousePositionTile.cpp src/ui/OSD.cpp src/ui/Tile.cpp src/ui/Button.cpp src/ui/MainAtlas.cpp src/ui/ModalContainer.cpp
+    src/ui/FadeButton.cpp src/ui/Clipboard.cpp src/ui/ScreenshotWriter.cpp src/ui/TextInput.cpp src/ui/SelectSystem.cpp src/ui/SystemButton.cpp
+    src/ui/LabeledButton.cpp src/ui/FadeContainer.cpp src/ui/SlotButton.cpp src/ui/StatusMessage.cpp src/ui/DrivesHUD.cpp
+    src/ui/SpeedSelect.cpp src/ui/HoverControls.cpp src/ui/DisplaySelect.cpp src/ui/DrivesOSD.cpp src/ui/HD20SC_Button.cpp
+    src/ui/DirtyDiskSave.cpp src/ui/QuitModal.cpp src/ui/ScrollBar.cpp src/ui/WrapContainer.cpp
+    src/ui/StorageButtonFactory.cpp src/ui/SlotsPanel.cpp src/ui/SystemBadge.cpp src/ui/ConfigSelectors.cpp
+    src/ui/EditSystem.cpp
+    src/ui/SerialPortButton.cpp src/ui/SerialPortsOSD.cpp
+)
+
+add_library(gs2_displaypp src/devices/displaypp/frame/frame_bit.cpp src/devices/displaypp/frame/frame_byte.cpp
+    src/devices/displaypp/CharRom.cpp src/devices/displaypp/AppleIIgsColors.cpp
+    src/devices/displaypp/generate/AppleII.cpp)
+
+add_library(gs2_ntsc
+    src/display/ntsc.cpp
+    src/display/Matrix3x3.cpp
+    src/display/OEVector.cpp
+    src/display/filters.cpp
+    src/display/shaders/GpuShaderLoader.cpp
+)
+
+target_link_libraries(gs2_displaypp PUBLIC gs2_ntsc)
+
+#add_library(gs2_diskii src/devices/diskii/ndiskii.cpp)
+
+add_library(gs2_devices_floppy_woz
+    src/util/woz.cpp
+    src/util/woz_nibblizer.cpp
+    src/util/woz_nibblizer_525.cpp
+    src/util/woz_nibblizer_35.cpp
+    src/devices/floppy/Floppy_woz.cpp
+    src/devices/floppy/Floppy525_woz.cpp
+    src/devices/floppy/Floppy35_woz.cpp
+)
+
+target_link_libraries(gs2_devices_floppy_woz 
+#gs2_devices_diskii_fmt 
+gs2_util)
+
+add_library(gs2_devices_diskii_woz
+    src/devices/diskii/ndiskii_woz.cpp
+)
+
+add_library(gs2_message_bus src/mbus/MessageBus.cpp)
+
+add_library(gs2_paths src/paths.cpp)
+
+set(GS2_DEVICE_REGISTRY_LIBS
+    gs2_devices_tcp
+    gs2_devices_keyboard
+    gs2_devices_languagecard
+    gs2_devices_prodos_clock
+    gs2_devices_speaker
+    gs2_devices_cassette
+    gs2_devices_vidhd
+    gs2_devices_game
+    gs2_devices_memexp
+    gs2_devices_parallel
+    gs2_devices_videx
+    gs2_devices_pdblock2
+    gs2_devices_pdblock3
+    gs2_devices_mockingboard
+    gs2_devices_iiememory
+    gs2_devices_ensoniq
+    gs2_devices_scc8530
+    gs2_devices_ssc
+    gs2_devices_secondsight
+    gs2_devices_iwm
+    gs2_devices_mouse
+    gs2_devices_rtc_pram
+    gs2_devices_adb
+    gs2_devices_diskii_woz
+    gs2_devices_hostfst
+    gs2_devices_uthernet2
+    gs2_displaypp
+    gs2_video_scanner
+    gs2_computer
+)
+
+add_library(gs2_device_info src/device_info.cpp)
+
+add_library(gs2_device_registry
+    src/devices.cpp
+    src/display/display.cpp
+)
+target_link_libraries(gs2_device_registry PUBLIC ${GS2_DEVICE_REGISTRY_LIBS} gs2_ntsc gs2_device_info)
+
+add_library(gs2_toml src/util/toml_impl.cpp)
+target_compile_definitions(gs2_toml PUBLIC TOML_HEADER_ONLY=0)
+target_compile_definitions(gs2_toml PRIVATE TOML_IMPLEMENTATION)
+target_include_directories(gs2_toml PUBLIC ${CMAKE_SOURCE_DIR}/src)
+
+add_library(gs2_systemconfig
+    src/util/SystemConfig.cpp
+    src/util/SettingsConfig.cpp
+    src/util/ConfigDraft.cpp
+    src/util/SystemSettings.cpp
+    src/util/uuid.cpp
+)
+target_link_libraries(gs2_systemconfig PUBLIC gs2_paths gs2_device_info gs2_toml)
+
+add_library(gs2_video_scanner 
+    src/devices/displaypp/ScanBuffer.cpp
+    src/devices/displaypp/VideoScannerII.cpp 
+    src/devices/displaypp/VideoScannerIIe.cpp 
+    src/devices/displaypp/VideoScannerIIePAL.cpp 
+    src/devices/displaypp/VideoScannerIIgs.cpp
+    src/devices/displaypp/VideoScanGenerator.cpp 
+    src/devices/displaypp/VideoScanGenerator_Comp.cpp
+    src/devices/displaypp/VideoScanGenerator_RGB.cpp
+    )
+target_link_libraries(gs2_video_scanner PUBLIC gs2_displaypp)
+
+add_library(gs2_devices_rtc_pram src/devices/rtc/rtc_pram.cpp)
+target_link_libraries(gs2_devices_rtc_pram PUBLIC gs2_paths)
+
+target_link_libraries(gs2_ui ${GS2_SDL3_IMAGE} ${GS2_SDL3_TTF} gs2_systemconfig gs2_devices_hostfst)
+target_link_libraries(gs2_debugger gs2_trace gs2_util gs2_displaypp ${GS2_SDL3} ${GS2_SDL3_TTF})
+# Connections.cpp constructs SerialDevice subclasses; link after gs2_util for GNU ld.
+target_link_libraries(gs2_util PUBLIC gs2_serial_devices ${GS2_SDL3_TTF})
+target_link_libraries(gs2_computer ${GS2_SDL3_TTF})
+target_link_libraries(gs2_cpu gs2_trace)
+target_link_libraries(gs2_mmu gs2_trace gs2_cpu)
+target_link_libraries(gs2_devices_adb gs2_util)
+target_link_libraries(gs2_devices_iwm gs2_devices_floppy_woz)
+target_link_libraries(gs2_devices_diskii_woz gs2_devices_floppy_woz gs2_util)
+
+# Add the executable. The .icns is only meaningful as a macOS bundle resource;
+# leave it out on other targets (Emscripten would try to compile it).
+set(GS2_PLATFORM_SOURCES "")
+if(APPLE)
+    list(APPEND GS2_PLATFORM_SOURCES ${CMAKE_SOURCE_DIR}/assets/img/gs2.icns)
+endif()
+add_executable(GSSquared src/gs2.cpp src/debug.cpp  src/opcodes.cpp 
+    src/platforms.cpp
+    src/slots.cpp src/systemconfig.cpp
+    src/videosystem.cpp
+    src/util/AudioSystem.cpp
+    ${GS2_PLATFORM_SOURCES}
+    )
+
+# Link SDL3 and required frameworks
+target_link_libraries(GSSquared PRIVATE 
+    ${GS2_SDL3}
+    ${GS2_SDL3_IMAGE}
+    ${GS2_SDL3_NET}
+)
+if(WIN32)
+    # We'll bundle the MinGW runtime DLLs instead of static linking
+    # This is more reliable and easier to manage
+endif()
+target_link_libraries(GSSquared 
+    PUBLIC
+    gs2_cpu_new
+    gs2_computer
+    gs2_mmu
+    gs2_ntsc
+    gs2_devices_tcp 
+    gs2_devices_keyboard 
+    #gs2_devices_diskii_fmt 
+    gs2_devices_languagecard 
+    gs2_devices_prodos_clock
+    gs2_devices_speaker
+    gs2_devices_cassette
+    gs2_devices_vidhd
+    gs2_devices_game
+    gs2_devices_memexp
+    gs2_devices_parallel
+    gs2_devices_videx
+    gs2_devices_pdblock2
+    gs2_devices_pdblock3
+    gs2_devices_mockingboard
+    gs2_devices_iiememory
+    gs2_devices_ensoniq
+    gs2_devices_scc8530
+    gs2_devices_ssc
+    gs2_devices_secondsight
+    gs2_devices_iwm
+    gs2_serial_devices
+    gs2_debugger
+    #gs2_util
+    gs2_util_audio
+    gs2_ui
+    gs2_event_dispatcher
+    gs2_displaypp
+    gs2_message_bus
+    gs2_paths
+    gs2_video_scanner
+    gs2_devices_mouse
+    gs2_devices_rtc_pram
+    gs2_devices_adb
+    #gs2_diskii
+    gs2_devices_diskii_woz
+    gs2_device_registry
+    gs2_systemconfig
+    platform_specific
+)
+
+# Ensure building just GSSquared still triggers the resource assembly step.
+add_dependencies(GSSquared assemble_resources)
+
+# The auxiliary apps are developer tools and are not part of the web build.
+if(NOT EMSCRIPTEN)
+    enable_testing()
+
+    add_subdirectory(apps/adbtest)
+
+    add_subdirectory(apps/mbtest)
+
+    #add_subdirectory(apps/nibblizer)
+    #add_subdirectory(apps/denibblizer)
+    add_subdirectory(apps/vgatext)
+
+    add_subdirectory(apps/ssppu)
+
+    add_subdirectory(apps/diskid)
+
+    # Temporary disabled, need to refactor it to match new nibblizer API.
+    add_subdirectory(apps/wozutil)
+
+    #add_subdirectory(apps/speaker) # Temporarily remove until I make a "fake computer" interface.
+
+    add_subdirectory(apps/gstrace)
+
+    add_subdirectory(apps/iigsmmutest)
+
+    add_subdirectory(apps/mmutest)
+
+    add_subdirectory(apps/cputest)
+
+    add_subdirectory(apps/montest)
+
+    add_subdirectory(apps/cycletest)
+
+    #add_subdirectory(apps/dpp)
+    add_subdirectory(apps/vpp)
+
+    add_subdirectory(apps/iieromcsum)
+
+    add_subdirectory(apps/binprint)
+
+    add_subdirectory(apps/cpu816test)
+
+    add_subdirectory(apps/ui)
+
+    add_subdirectory(apps/rtctest)
+
+    add_subdirectory(apps/doc)
+
+    add_subdirectory(apps/mousebugtest)
+
+    add_subdirectory(apps/systemconfigtest)
+endif()
+
+################################################################################
+#### Platform Specific Code
+################################################################################
+if(APPLE)
+    add_library(platform_specific
+        src/platform-specific/macos/menu.mm
+        src/platform-specific/macos/gs2_save_dialog.mm
+    )
+
+    target_include_directories(platform_specific PUBLIC
+        ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(platform_specific PRIVATE
+        ${GS2_SDL3}
+        "-framework Cocoa"
+    )
+
+    # Bare (PROGRAM_FILES) builds still need the UTI from Info.plist so Launch
+    # Services / NSSavePanel recognize .gs2 as our declared type.
+    if(GS2_PROGRAM_FILES)
+        target_link_options(GSSquared PRIVATE
+            "LINKER:-sectcreate,__TEXT,__info_plist,${PROJECT_BINARY_DIR}/generated/Info.plist"
+        )
+        # Keep a stub .app Info.plist current for Finder / lsregister (optional).
+        add_custom_command(TARGET GSSquared POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "${PROJECT_BINARY_DIR}/GSSquared.app/Contents"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${PROJECT_BINARY_DIR}/generated/Info.plist"
+                "${PROJECT_BINARY_DIR}/GSSquared.app/Contents/Info.plist"
+            COMMENT "Updating GSSquared.app Info.plist (.gs2 UTI)"
+        )
+    endif()
+endif()
+
+# Linux and Emscripten both use the portable Dear ImGui menu (linux/menu.cpp is
+# pure ImGui + the SDL3 renderer backend, with no GTK/X11 dependency).
+if((UNIX AND NOT APPLE) OR EMSCRIPTEN)
+    set(GS2_USE_IMGUI ON)
+
+    set(GS2_PLATFORM_SPECIFIC_SOURCES src/platform-specific/linux/menu.cpp)
+    if(EMSCRIPTEN)
+        # Browser file picker used in place of SDL_ShowOpenFileDialog.
+        list(APPEND GS2_PLATFORM_SPECIFIC_SOURCES
+            src/platform-specific/emscripten/web_file_dialog.cpp)
+    endif()
+
+    add_library(platform_specific ${GS2_PLATFORM_SPECIFIC_SOURCES})
+
+    target_include_directories(platform_specific PRIVATE
+        src/imgui
+    )
+    target_link_libraries(platform_specific PRIVATE
+        ${GS2_SDL3}
+        gs2_imgui
+    )
+endif()
+
+if(WIN32)
+    add_library(platform_specific src/platform-specific/windows/menu.cpp)
+
+    target_link_libraries(platform_specific PRIVATE
+        ${GS2_SDL3}
+    )
+endif()
+
+if(GS2_USE_IMGUI)
+    add_library(gs2_imgui
+        src/imgui/imgui.cpp
+        src/imgui/imgui_draw.cpp
+        src/imgui/imgui_tables.cpp
+        src/imgui/imgui_widgets.cpp
+        src/imgui/backends/imgui_impl_sdl3.cpp
+        src/imgui/backends/imgui_impl_sdlrenderer3.cpp
+    )
+    target_include_directories(gs2_imgui PUBLIC src/imgui)
+    target_link_libraries(gs2_imgui PRIVATE ${GS2_SDL3})
+endif()
+
+################################################################################
+#### Packaging targets per platform
+################################################################################
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    if(GS2_PROGRAM_FILES)
+        # PROGRAM FILES: Build bare executable, everything goes to build/ directory
+        message(STATUS "Building as PROGRAM FILES: Bare executable and files in one directory")
+
+        # Set RPATH for dev mode to look in build/lib
+        # Build tree: executable in build/, libs in build/lib/
+        # Install: same layout (program files stay together)
+        set_target_properties(GSSquared PROPERTIES
+            OUTPUT_NAME "GSSquared"
+            BUILD_RPATH "@executable_path/lib"
+            INSTALL_RPATH "@executable_path/lib"
+            INSTALL_RPATH_USE_LINK_PATH TRUE
+        )
+
+        # Resources are already set up by assemble_resources target
+        # SDL libraries are already in build/lib
+        # Executable will be in build/GSSquared
+        # This gives you the structure: build/GSSquared, build/lib/, build/resources/
+
+    else()
+        # BUNDLE: Build app bundle (current behavior)
+        message(STATUS "Building as BUNDLE: macOS app bundle")
+
+        # now, we always create a bundle, so we don't need to create a custom target for it
+        # Add icon file as a resource for macOS bundles
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/assets/img/gs2.icns PROPERTIES RESOURCE TRUE)
+        set_target_properties(GSSquared PROPERTIES
+            OUTPUT_NAME "GSSquared"
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_INFO_PLIST ${PROJECT_BINARY_DIR}/generated/Info.plist
+
+            # RPATH for dynamic libraries
+            INSTALL_RPATH "@executable_path/../Frameworks"
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH_USE_LINK_PATH TRUE
+        )
+
+        # Configure CPack
+        set(CPACK_GENERATOR "Bundle")
+        set(CPACK_BUNDLE_NAME "GSSquared")
+        set(CPACK_BUNDLE_PLIST "${PROJECT_BINARY_DIR}/generated/Info.plist")
+        set(CPACK_BUNDLE_ICON "${CMAKE_SOURCE_DIR}/assets/img/gs2.icns")
+        # Package version info
+        set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+        # Bundle identifier and other metadata
+        set(CPACK_BUNDLE_IDENTIFIER "com.bazyar.gs2")
+        set(CPACK_PACKAGE_VENDOR "Jawaid Bazyar")
+
+        # Link Mac-specific libraries we need
+        target_link_libraries(GSSquared PRIVATE
+            "-framework OpenGL" 
+            "-framework Cocoa"
+        )
+
+        install(TARGETS GSSquared
+            BUNDLE DESTINATION .
+            COMPONENT Runtime
+        )
+
+        # Install SDL targets with all their dependencies
+        install(TARGETS 
+            SDL3-shared 
+            SDL3_image-shared 
+            SDL3_ttf-shared
+            SDL3_net-shared
+            LIBRARY DESTINATION "GSSquared.app/Contents/Frameworks"
+            COMPONENT Runtime
+        )
+        # Install resources
+        install(DIRECTORY "${CMAKE_BINARY_DIR}/resources/"
+            DESTINATION "${CPACK_BUNDLE_NAME}.app/Contents/Resources"
+            COMPONENT Runtime)
+
+        # Linker ad-hoc signing leaves Info.plist unbound. Re-sign so the bundle
+        # identifier / exported UTIs in Info.plist are properly associated with
+        # this app for Launch Services (Finder Open). Does not affect NSSavePanel
+        # file enablement — save panels always show existing files gray on macOS.
+        add_custom_command(TARGET GSSquared POST_BUILD
+            COMMAND codesign --force --deep -s - "$<TARGET_BUNDLE_DIR:GSSquared>"
+            COMMENT "Ad-hoc codesign GSSquared.app (bind Info.plist)"
+        )
+        # cmake --install copies Frameworks after the build-tree bundle exists;
+        # re-sign the installed app so Info.plist stays bound there too.
+        install(CODE [[
+            execute_process(
+                COMMAND codesign --force --deep -s - "${CMAKE_INSTALL_PREFIX}/GSSquared.app"
+                RESULT_VARIABLE _gs2_codesign_rc
+            )
+            if(NOT _gs2_codesign_rc EQUAL 0)
+                message(WARNING "codesign of installed GSSquared.app failed (rc=${_gs2_codesign_rc})")
+            endif()
+        ]] COMPONENT Runtime)
+
+        # Optional: Configure DMG creation
+        set(CPACK_DMG_VOLUME_NAME "GSSquared")
+        set(CPACK_DMG_FORMAT "UDZO")
+        set(CPACK_GENERATOR "Bundle;DragNDrop") # This creates both .app and .dmg
+
+        include(CPack)
+    endif()
+endif()
+
+## Windows packaging targets
+
+if(WIN32)
+    if(GS2_PROGRAM_FILES)
+        message(STATUS "Windows: Installing for PROGRAM_FILES (in-place run)")
+        # Install main executable
+        install(TARGETS GSSquared
+            RUNTIME DESTINATION bin
+            COMPONENT Runtime
+        )
+        # Install SDL DLLs to bin
+        install(FILES
+            ${CMAKE_BINARY_DIR}/SDL3.dll
+            ${CMAKE_BINARY_DIR}/SDL3_image.dll
+            ${CMAKE_BINARY_DIR}/SDL3_ttf.dll
+            ${CMAKE_BINARY_DIR}/SDL3_net.dll
+            DESTINATION bin
+            COMPONENT Runtime
+        )
+        # Install MinGW runtime DLLs to bin
+        install(FILES
+            C:/msys64/mingw64/bin/libgcc_s_seh-1.dll
+            C:/msys64/mingw64/bin/libstdc++-6.dll
+            C:/msys64/mingw64/bin/libwinpthread-1.dll
+            DESTINATION bin
+            COMPONENT Runtime
+            OPTIONAL
+        )
+        # Install import libs to lib (optional for devs)
+        install(FILES
+            ${CMAKE_BINARY_DIR}/lib/libSDL3.dll.a
+            ${CMAKE_BINARY_DIR}/lib/libSDL3_image.dll.a
+            ${CMAKE_BINARY_DIR}/lib/libSDL3_ttf.dll.a
+            ${CMAKE_BINARY_DIR}/lib/libSDL3_net.dll.a
+            DESTINATION lib
+            COMPONENT Runtime
+        )
+        # Install resources
+        install(DIRECTORY ${CMAKE_BINARY_DIR}/resources/
+            DESTINATION resources
+            COMPONENT Runtime
+        )
+    else()
+        message(STATUS "Windows: Installing for packaging (zip)")
+        # Same as above, but set up CPack for zip
+        install(TARGETS GSSquared
+            RUNTIME DESTINATION .
+            COMPONENT Runtime
+        )
+        install(FILES
+            ${CMAKE_BINARY_DIR}/SDL3.dll
+            ${CMAKE_BINARY_DIR}/SDL3_image.dll
+            ${CMAKE_BINARY_DIR}/SDL3_ttf.dll
+            ${CMAKE_BINARY_DIR}/SDL3_net.dll
+            DESTINATION .
+            COMPONENT Runtime
+        )
+        # Install MinGW runtime DLLs to root
+        install(FILES
+            C:/msys64/mingw64/bin/libgcc_s_seh-1.dll
+            C:/msys64/mingw64/bin/libstdc++-6.dll
+            C:/msys64/mingw64/bin/libwinpthread-1.dll
+            DESTINATION .
+            COMPONENT Runtime
+            OPTIONAL
+        )
+        install(FILES
+            ${CMAKE_BINARY_DIR}/lib/libSDL3.dll.a
+            ${CMAKE_BINARY_DIR}/lib/libSDL3_image.dll.a
+            ${CMAKE_BINARY_DIR}/lib/libSDL3_ttf.dll.a
+            ${CMAKE_BINARY_DIR}/lib/libSDL3_net.dll.a
+            DESTINATION lib
+            COMPONENT Runtime
+        )
+        install(DIRECTORY ${CMAKE_BINARY_DIR}/resources/
+            DESTINATION resources
+            COMPONENT Runtime
+        )
+        # CPack zip config
+        set(CPACK_GENERATOR "ZIP")
+        set(CPACK_PACKAGE_NAME "gssquared")
+        set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+        set(CPACK_PACKAGE_VENDOR "Jawaid Bazyar")
+        set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "GSSquared Apple II Emulator")
+        include(CPack)
+    endif()
+endif()
+
+# Non-Apple UNIX-specific configuration here
+if((UNIX) AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT EMSCRIPTEN)
+    if(GS2_PROGRAM_FILES)
+        # TODO: Make this work for MSYS; no more hard-coded Linux stuff
+        # PROGRAM FILES: Build bare executable, everything goes to build/ directory
+        message(STATUS "Building as PROGRAM FILES: Bare executable and files in one directory")
+
+        # Set CPack variables based on platform
+        if(WIN32)
+            set(CPACK_GENERATOR "ZIP")
+        else()
+            set(CPACK_GENERATOR "TGZ")
+        endif()
+        set(CPACK_PACKAGE_NAME "gssquared")
+        set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+        set(CPACK_PACKAGE_VENDOR "Jawaid Bazyar")
+        set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "GSSquared Apple II Emulator")
+        
+        # Install the main executable
+        install(TARGETS GSSquared
+            RUNTIME DESTINATION bin
+            COMPONENT Runtime
+        )
+
+        # Install SDL shared libraries with their symlinks
+        install(TARGETS 
+            SDL3-shared 
+            SDL3_image-shared 
+            SDL3_ttf-shared
+            SDL3_net-shared
+            LIBRARY DESTINATION lib
+            COMPONENT Runtime
+        )
+
+        # Install resources (using the already assembled resources from assemble_resources target)
+        install(DIRECTORY "${CMAKE_BINARY_DIR}/resources/"
+            DESTINATION resources
+            COMPONENT Runtime
+        )
+
+        # Fix RPATH for the executable
+        # Build tree: executable and libs both in build/ -> look in lib/ subdir
+        # Install: executable in bin/, libs in lib/ -> look in ../lib
+        set_target_properties(GSSquared PROPERTIES
+            BUILD_RPATH "$ORIGIN/lib"
+            INSTALL_RPATH "\$ORIGIN/../lib"
+        )
+
+        include(CPack)
+
+    else()
+        # GNU INSTALL DIRS: Install files per the GNU installation directories layout
+        # Used for both installing into the system (package managers) and AppDir
+        message(STATUS "Building as GNU INSTALL DIRS: GNU standard filesystem layout")
+
+        # Set CPack generator based on platform
+        if(WIN32)
+            set(CPACK_GENERATOR "ZIP")
+        else()
+            set(CPACK_GENERATOR "TGZ")
+        endif()
+        set(CPACK_PACKAGE_NAME "gssquared")
+        set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+        set(CPACK_PACKAGE_VENDOR "Jawaid Bazyar")
+        set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "GSSquared Apple II Emulator")
+
+        set(GS2_GNU_INSTALL_DIRS ON)
+        include(GNUInstallDirs)
+        set(GS2_INSTALL_DATADIR "${CMAKE_INSTALL_DATADIR}/GSSquared")
+        install(TARGETS GSSquared
+            TYPE RUNTIME
+            COMPONENT Runtime
+        )
+        set_target_properties(GSSquared PROPERTIES
+            OUTPUT_NAME "GSSquared"
+        )
+        if(GS2_BUNDLE_LIBS)
+            install(TARGETS 
+                SDL3-shared 
+                SDL3_image-shared 
+                SDL3_ttf-shared
+                SDL3_net-shared
+                TYPE LIBRARY
+                COMPONENT Runtime
+            )
+            # Build tree: executable in build/, libs in build/lib/ -> look in lib/ subdir
+            # Install: executable in bin/, libs in lib/ -> look in ../lib
+            set_target_properties(GSSquared PROPERTIES
+                BUILD_RPATH "$ORIGIN/lib"
+                INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+                INSTALL_RPATH_USE_LINK_PATH TRUE
+            )
+        else()
+            # When not bundling libs, executable and libs stay in build tree layout
+            # Build tree: executable in build/, libs in build/lib/ -> look in lib/ subdir
+            set_target_properties(GSSquared PROPERTIES
+                BUILD_RPATH "$ORIGIN/lib"
+                INSTALL_RPATH "${CMAKE_INSTALL_LIBDIR}"
+            )
+        endif()
+        install(DIRECTORY "${CMAKE_BINARY_DIR}/resources/roms"
+            DESTINATION "${GS2_INSTALL_DATADIR}"
+            COMPONENT Runtime
+        )
+        install(DIRECTORY "${CMAKE_BINARY_DIR}/resources/sounds"
+            DESTINATION "${GS2_INSTALL_DATADIR}"
+            COMPONENT Runtime
+        )
+        install(DIRECTORY "${CMAKE_BINARY_DIR}/resources/fonts"
+            DESTINATION "${GS2_INSTALL_DATADIR}"
+            COMPONENT Runtime
+        )
+        install(DIRECTORY "${CMAKE_BINARY_DIR}/resources/gs2"
+            DESTINATION "${GS2_INSTALL_DATADIR}"
+            COMPONENT Runtime
+        )
+        install(DIRECTORY "${CMAKE_BINARY_DIR}/resources/vdisk"
+            DESTINATION "${GS2_INSTALL_DATADIR}"
+            COMPONENT Runtime
+        )
+        install(FILES "${CMAKE_BINARY_DIR}/resources/img/atlas.png"
+            DESTINATION "${GS2_INSTALL_DATADIR}/img"
+            COMPONENT Runtime
+        )
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            # The files here are only used by Linux, not other platforms
+            # These are also required for AppDirs, when producing AppImage
+            install(FILES assets/img/GSSquared.svg
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps"
+                COMPONENT Runtime
+            )
+            # Install PNG icons for better file manager support
+            install(FILES assets/img/MyIcon.iconset/icon_16x16.png
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/16x16/apps"
+                RENAME GSSquared.png
+                COMPONENT Runtime
+            )
+            install(FILES assets/img/MyIcon.iconset/icon_32x32.png
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/32x32/apps"
+                RENAME GSSquared.png
+                COMPONENT Runtime
+            )
+            install(FILES assets/img/MyIcon.iconset/icon_128x128.png
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps"
+                RENAME GSSquared.png
+                COMPONENT Runtime
+            )
+            install(FILES assets/img/MyIcon.iconset/icon_256x256.png
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps"
+                RENAME GSSquared.png
+                COMPONENT Runtime
+            )
+            install(FILES assets/img/MyIcon.iconset/icon_512x512.png
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps"
+                RENAME GSSquared.png
+                COMPONENT Runtime
+            )
+            install(FILES assets/GSSquared.desktop
+                DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+                COMPONENT Runtime
+            )
+        endif()
+        include(CPack)
+    endif()
+
+    # AppImage build target using linuxdeploy
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Find linuxdeploy
+        find_program(LINUXDEPLOY_EXECUTABLE
+            NAMES linuxdeploy linuxdeploy-x86_64.AppImage
+            PATHS
+                ${CMAKE_BINARY_DIR}
+                ${CMAKE_SOURCE_DIR}
+                /usr/local/bin
+                /usr/bin
+                $ENV{HOME}/.local/bin
+        )
+
+        set(LINUXDEPLOY_APPIMAGE "${CMAKE_BINARY_DIR}/linuxdeploy-x86_64.AppImage")
+        set(LINUXDEPLOY_NEEDS_DOWNLOAD FALSE)
+        
+        if(NOT LINUXDEPLOY_EXECUTABLE)
+            # Download linuxdeploy if not found
+            set(LINUXDEPLOY_URL "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage")
+            set(LINUXDEPLOY_NEEDS_DOWNLOAD TRUE)
+            
+            message(STATUS "linuxdeploy not found, will download to ${LINUXDEPLOY_APPIMAGE}")
+            
+            # Find curl or wget for downloading
+            find_program(CURL_EXECUTABLE NAMES curl)
+            find_program(WGET_EXECUTABLE NAMES wget)
+            
+            if(CURL_EXECUTABLE)
+                add_custom_command(
+                    OUTPUT ${LINUXDEPLOY_APPIMAGE}
+                    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}
+                    COMMAND ${CURL_EXECUTABLE} -L ${LINUXDEPLOY_URL} -o ${LINUXDEPLOY_APPIMAGE}
+                    COMMAND chmod +x ${LINUXDEPLOY_APPIMAGE}
+                    COMMENT "Downloading linuxdeploy"
+                )
+            elseif(WGET_EXECUTABLE)
+                add_custom_command(
+                    OUTPUT ${LINUXDEPLOY_APPIMAGE}
+                    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}
+                    COMMAND ${WGET_EXECUTABLE} ${LINUXDEPLOY_URL} -O ${LINUXDEPLOY_APPIMAGE}
+                    COMMAND chmod +x ${LINUXDEPLOY_APPIMAGE}
+                    COMMENT "Downloading linuxdeploy"
+                )
+            else()
+                message(FATAL_ERROR "linuxdeploy not found and neither curl nor wget available to download it")
+            endif()
+            
+            set(LINUXDEPLOY_EXECUTABLE ${LINUXDEPLOY_APPIMAGE})
+        else()
+            message(STATUS "Found linuxdeploy: ${LINUXDEPLOY_EXECUTABLE}")
+        endif()
+
+        # Set AppDir path
+        set(APPIMAGE_APPDIR "${CMAKE_BINARY_DIR}/AppDir")
+
+        # Prepare dependencies list
+        set(APPIMAGE_DEPENDS GSSquared assemble_resources)
+        # If we're downloading linuxdeploy, add it as a dependency
+        if(LINUXDEPLOY_NEEDS_DOWNLOAD)
+            list(APPEND APPIMAGE_DEPENDS ${LINUXDEPLOY_APPIMAGE})
+        endif()
+
+        # Create AppImage target
+        add_custom_target(appimage
+            # Clean and create AppDir
+            COMMAND ${CMAKE_COMMAND} -E remove_directory ${APPIMAGE_APPDIR}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${APPIMAGE_APPDIR}
+            # Install into AppDir
+            COMMAND ${CMAKE_COMMAND} --install . --prefix ${APPIMAGE_APPDIR}/usr --component Runtime
+            # Ensure library directory exists (linuxdeploy will find and bundle libraries automatically)
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${APPIMAGE_APPDIR}/usr/${CMAKE_INSTALL_LIBDIR}
+            # Copy PNG icon to AppDir root as .DirIcon for file manager display
+            # This ensures file managers see a proper PNG icon, not just a symlink
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${APPIMAGE_APPDIR}/usr/share/icons/hicolor/256x256/apps/GSSquared.png
+                    ${APPIMAGE_APPDIR}/.DirIcon
+            # Run linuxdeploy to create AppImage
+            # linuxdeploy will automatically find and bundle dependencies
+            # Use PNG icon (256x256) for better file manager support
+            # LD_LIBRARY_PATH must include build lib dir and AppDir lib dir so linuxdeploy
+            # can resolve vendored SDL3 dependencies (libSDL3_ttf -> libSDL3) when running ldd
+            COMMAND ${CMAKE_COMMAND} -E env
+                    LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/lib:${APPIMAGE_APPDIR}/usr/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}
+                    ${LINUXDEPLOY_EXECUTABLE}
+                    --appdir ${APPIMAGE_APPDIR}
+                    --executable ${APPIMAGE_APPDIR}/usr/bin/GSSquared
+                    --desktop-file ${APPIMAGE_APPDIR}/usr/share/applications/GSSquared.desktop
+                    --icon-file ${APPIMAGE_APPDIR}/usr/share/icons/hicolor/256x256/apps/GSSquared.png
+                    --output appimage
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            DEPENDS ${APPIMAGE_DEPENDS}
+            COMMENT "Creating AppImage with linuxdeploy"
+        )
+
+        message(STATUS "AppImage target available: cmake --build build --target appimage")
+    endif()
+endif()
+
+configure_file(src/build_config.hpp.in "${CMAKE_BINARY_DIR}/cfg/build_config.hpp" @ONLY)
+
+################################################################################
+#### Emscripten (WebAssembly) build configuration
+################################################################################
+if(EMSCRIPTEN)
+    message(STATUS "Configuring Emscripten web build")
+
+    # Note: -pthread (compile + link) is applied globally above so SDL and the
+    # gs2_* libraries are built with atomics/shared-memory. COOP/COEP headers
+    # are required when serving (SharedArrayBuffer).
+
+    # Resources are assembled into ${CMAKE_BINARY_DIR}/resources by the
+    # assemble_resources target; preload them into the WASM filesystem at
+    # /resources so SDL_GetBasePath()-relative loads (see src/paths.cpp) work.
+    set(GS2_WEB_PRELOAD "${CMAKE_BINARY_DIR}/resources@/resources")
+
+    target_link_options(GSSquared PRIVATE
+        -pthread
+        -sPTHREAD_POOL_SIZE=8
+        -sALLOW_MEMORY_GROWTH=1
+        -sMAXIMUM_MEMORY=1gb
+        -sINITIAL_MEMORY=268435456          # 256 MB headroom for IIgs RAM + textures
+        -sSTACK_SIZE=4mb
+        -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS,stringToNewUTF8,UTF8ToString
+        -sFORCE_FILESYSTEM=1
+        -lidbfs.js
+        --preload-file ${GS2_WEB_PRELOAD}
+        --shell-file ${CMAKE_SOURCE_DIR}/assets/web/shell.html
+    )
+    # Emscripten consumes the shell during the final link, but CMake does not
+    # infer that --shell-file is an input dependency. Track it explicitly so
+    # edits to assets/web/shell.html regenerate GSSquared.html.
+    set_property(TARGET GSSquared APPEND PROPERTY
+        LINK_DEPENDS ${CMAKE_SOURCE_DIR}/assets/web/shell.html)
+
+    # WebAssembly SIMD optimization option
+    option(GS2_WASM_SIMD "Enable WebAssembly SIMD optimizations" OFF)
+    if(GS2_WASM_SIMD)
+        target_compile_options(GSSquared PRIVATE -msimd128)
+        target_link_options(GSSquared PRIVATE -msimd128)
+    endif()
+
+    # Optional: keep symbol names + runtime assertions for debugging the web
+    # build (readable JS/wasm stack traces, clearer FS/abort messages).
+    option(GS2_WEB_DEBUG "Build the web target with symbols and assertions" ON)
+    if(GS2_WEB_DEBUG)
+        target_link_options(GSSquared PRIVATE -g2 -sASSERTIONS=1)
+    endif()
+
+    # Emit GSSquared.html (+ .js/.wasm/.data) instead of a bare executable.
+    set_target_properties(GSSquared PROPERTIES SUFFIX ".html")
+
+    # Copy web shell support assets to the deploy root.
+    add_custom_command(TARGET GSSquared POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/img
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/img/gssquared-mark.png
+            ${CMAKE_BINARY_DIR}/img/gssquared-mark.png
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/web/manifest.json
+            ${CMAKE_BINARY_DIR}/manifest.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/web/sw.js
+            ${CMAKE_BINARY_DIR}/sw.js
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/web/coi-serviceworker.js
+            ${CMAKE_BINARY_DIR}/coi-serviceworker.js
+    )
+
+    # The preload step must run after resources are assembled.
+    add_dependencies(GSSquared assemble_resources)
+endif()

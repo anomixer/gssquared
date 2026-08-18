@@ -1,0 +1,230 @@
+/*
+ *   Copyright (c) 2025-2026 Jawaid Bazyar
+
+ *   This program is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+#pragma once
+
+#include <vector>
+#include <map>
+
+#include <SDL3/SDL.h>
+#include "util/MenuInterface.h"
+#include "MainAtlas.hpp"
+#include "NClock.hpp"
+
+#include "slots.hpp"
+
+#include "Container.hpp"
+#include "ModalContainer.hpp"
+#include "MousePositionTile.hpp"
+#include "HoverControls.hpp"
+#include "UIContext.hpp"
+#include "util/TextRenderer.hpp"
+#include "FadeButton.hpp"
+#include "util/EventQueue.hpp"
+#include "SelectButton.hpp"
+#include "StatusMessage.hpp"
+#include "DrivesOSD.hpp"
+#include "SerialPortsOSD.hpp"
+#include "SlotsPanel.hpp"
+#include "SystemBadge.hpp"
+
+#define SLIDE_IN 1
+#define SLIDE_OUT 2
+#define SLIDE_NONE 0
+
+#define slidePositionDeltaMax 200
+#define slidePositionDeltaMin 20
+#define slidePositionAcceleration 10
+#define slidePositionMax 1120
+
+class SystemConfig_t;
+
+/**
+ * @brief On-Screen Display manager class.
+ * 
+ * Handles the sliding control panel and its contained UI elements
+ * including disk drive controls, slot buttons, and monitor controls.
+ */
+class OSD {
+public:
+    EventQueue *event_queue = nullptr;
+    computer_t *computer = nullptr;
+
+protected:
+    int slideStatus = SLIDE_NONE;
+    int currentSlideStatus = SLIDE_OUT;
+    int slidePosition = -slidePositionMax;
+    int slidePositionDelta = slidePositionDeltaMax;
+
+    float osd_scale = 1.0f; // by default
+
+    SlotManager_t *slot_manager = nullptr;
+    
+    //Container_t *drive_container = nullptr;
+    DrivesOSD_t *drive_container = nullptr;
+    SerialPortsOSD_t *serial_ports_container = nullptr;
+    Container_t *connection_picker = nullptr;
+    connection_key_t picking_connection_key_{};
+
+    Container_t *speed_con = nullptr;
+    SelectButton_t *speed_btn_10 = nullptr;
+    SelectButton_t *speed_btn_28 = nullptr;
+    SelectButton_t *speed_btn_71 = nullptr;
+    SelectButton_t *speed_btn_8 = nullptr;
+    SelectButton_t *speed_btn_14 = nullptr;
+
+    Container_t *mon_color_con = nullptr;
+
+    Container_t *host_fst_con = nullptr;
+    Button_t *host_fst_btn = nullptr;
+
+    Button_t *save_btn = nullptr;
+    Button_t *save_as_btn = nullptr;
+    Button_t *discard_btn = nullptr;
+    Button_t *cancel_btn = nullptr;
+
+    NClock *clock = nullptr;
+
+    //int controlOpacity = 0;
+    Button_t *close_btn = nullptr;
+    FadeButton_t *open_btn = nullptr;
+
+    // System badge
+    SystemConfig_t *system_config = nullptr;
+    SystemBadge_t *system_badge = nullptr;
+
+    SlotsPanel_t *slot_container = nullptr;
+    
+    std::vector<Container_t *> containers;
+    std::vector<Container_t *> ncontainers;
+    Container_t *hud_drive_container = nullptr;
+    //ModalContainer_t *activeModal = nullptr;
+
+    HoverControls_t *hover_controls_con = nullptr;
+    
+    MousePositionTile_t* mouse_pos = nullptr;
+    AssetAtlas_t *aa = nullptr;
+    SDL_Renderer *renderer = nullptr;
+    SDL_Texture *cpTexture = nullptr;
+    SDL_Window *window = nullptr;
+    int window_w = 0;
+    int window_h = 0;
+    TextRenderer *text_render = nullptr;
+    TextRenderer *title_trender = nullptr;
+    UIContext ui_ctx;
+
+    /* std::string headsUpMessageText;
+    int headsUpMessageCount = 0; */
+    StatusMessage_t *status_message = nullptr;
+
+    modal_stack mstack;
+
+    int slideStatusBeforeDrop = SLIDE_NONE;
+
+    // Web (Emscripten) drag-and-drop: the SDL Emscripten backend sends no
+    // DROP_BEGIN and delivers DROP_FILE asynchronously (after DROP_COMPLETE),
+    // so we synthesize the "begin" on the first DROP_POSITION and defer the
+    // panel close until the file actually arrives. Harmless/unused elsewhere.
+    bool web_drag_active = false;
+
+    const std::map<int, int> monitor_asset =  {
+        {MONITOR_COMPOSITE, ColorDisplayButton},
+        {MONITOR_GS_RGB, RGBDisplayButton},
+        {MONITOR_MONO_GREEN, GreenDisplayButton},
+        {MONITOR_MONO_AMBER, AmberDisplayButton},
+        {MONITOR_MONO_WHITE, WhiteDisplayButton},
+    };
+    /* const std::map<int, int> speed_asset =  {
+        {SPEED_FREE_RUN, MHzInfinityButton},
+        {SPEED_1_0, MHz1_0Button},
+        {SPEED_2_8, MHz2_8Button},
+        {SPEED_7_1, MHz7_159Button},
+        {SPEED_14_3, MHz14_318Button},
+    }; */
+
+    Style_t ModalStyle = {
+        .background_color = 0xFFFFFFFF,
+        .border_color = 0xFF0000FF,
+        .padding = 3,
+        .border_width = 5,
+        .text_color = 0x000000FF,
+    };
+    
+public:
+    /**
+     * @brief Constructs the OSD with the given renderer and window.
+     * 
+     * @param rendererp SDL renderer to use
+     * @param windowp SDL window to render to
+     * @param window_width Width of the window
+     * @param window_height Height of the window
+     */
+    OSD(computer_t *computer, SDL_Renderer *rendererp, SDL_Window *windowp, SlotManager_t *slot_manager, int window_width, int window_height, AssetAtlas_t *aa);
+    ~OSD();
+    
+    /**
+     * @brief Gets the SDL window associated with this OSD.
+     * @return Pointer to the SDL window
+     */
+    SDL_Window *get_window();
+
+    /**
+     * @brief Updates the OSD state, including slide animations.
+     */
+    void update();
+
+    /**
+     * @brief Renders the OSD and all its components.
+     */
+    void render();
+
+    /**
+     * @brief Handles SDL events for the OSD.
+     * @param event The SDL event to process
+     */
+    bool event(const SDL_Event &event);
+
+    void set_raise_window();
+
+    void open_file_dialog(storage_key_t key);
+    void open_host_fst_folder_dialog();
+    void refresh_host_fst_button();
+
+    void show_connection_picker(connection_key_t key, connection_port_kind_t kind);
+    void dismiss_connection_picker();
+    void refresh_serial_ports();
+
+    void show_diskii_modal(storage_key_t key, uint64_t data);
+
+    void set_heads_up_message(const std::string &text, int count);
+
+    bool is_mouse_captured();
+
+    void open_panel();
+    void close_panel();
+
+    bool is_control_panel_active() const {
+        return currentSlideStatus == SLIDE_IN || slideStatus != SLIDE_NONE;
+    }
+
+    bool requires_host_cursor() const {
+        return is_control_panel_active() || !mstack.stack.empty();
+    }
+
+    void set_clock(NClock *clock) { this->clock = clock; }
+
+    bool check_for_dirty_disks();
+};

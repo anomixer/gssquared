@@ -1,0 +1,61 @@
+{
+    "name": "Apple II Plus",
+    "roms": [
+        {
+            "type": "main",
+            "output": "main.rom",
+            "base_address": "0xD000",
+            "size": 12288,
+            "parts": [
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20ROM%20Pages%20D0-D7%20-%20341-0011%20-%20Applesoft%20BASIC.bin",
+                    "filename": "341-0011.bin",
+                    "address": "0xD000",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20ROM%20Pages%20D8-DF%20-%20341-0012%20-%20Applesoft%20BASIC.bin",
+                    "filename": "341-0012.bin",
+                    "address": "0xD800",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20ROM%20Pages%20E0-E7%20-%20341-0013%20-%20Applesoft%20BASIC.bin",
+                    "filename": "341-0013.bin",
+                    "address": "0xE000",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20ROM%20Pages%20E8-EF%20-%20341-0014%20-%20Applesoft%20BASIC.bin",
+                    "filename": "341-0014.bin",
+                    "address": "0xE800",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20ROM%20Pages%20F0-F7%20-%20341-0015%20-%20Applesoft%20BASIC.bin",
+                    "filename": "341-0015.bin",
+                    "address": "0xF000",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20ROM%20Pages%20F8-FF%20-%20341-0020%20-%20Autostart%20Monitor.bin",
+                    "filename": "341-0020.bin",
+                    "address": "0xF800",
+                    "size": 2048
+                }
+            ]
+        },
+        {
+            "type": "character",
+            "output": "char.rom",
+            "size": 2048,
+            "parts": [
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20Video%20ROM%20-%20341-0036%20-%20Rev.%207.bin",
+                    "filename": "341-0036.bin",
+                    "size": 2048
+                }
+            ]
+        }
+    ]
+} 

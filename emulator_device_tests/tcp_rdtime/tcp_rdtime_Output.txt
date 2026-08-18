@@ -1,0 +1,143 @@
+------+--------------------------+-------------+----+---------+------+-----------------------+-------------------------------------------------------------------
+ Line | # File              Line | Line Type   | MX |  Reloc  | Size | Address   Object Code |  Source Code                                                      
+------+--------------------------+-------------+----+---------+------+-----------------------+-------------------------------------------------------------------
+    1 |  1 tcp_rdtime.a65      1 | Comment     | 11 |         |    0 | 00/8000               | *********************************************************
+    2 |  1 tcp_rdtime.a65      2 | Comment     | 11 |         |    0 | 00/8000               | * RDTIME SUBROUTINE: READ THE TIME FROM THE
+    3 |  1 tcp_rdtime.a65      3 | Comment     | 11 |         |    0 | 00/8000               | * THUNDERCLOCK WITHOUT USING THE ON-CARD
+    4 |  1 tcp_rdtime.a65      4 | Comment     | 11 |         |    0 | 00/8000               | * FIRMWARE. THE A-REGISTER SHOULD CONTAIN
+    5 |  1 tcp_rdtime.a65      5 | Comment     | 11 |         |    0 | 00/8000               | * THE SLOT # OF THE THUNDERCLOCK WHEN YOU
+    6 |  1 tcp_rdtime.a65      6 | Comment     | 11 |         |    0 | 00/8000               | * CALL RDTIME, AND UPON RETURN, THE TIME
+    7 |  1 tcp_rdtime.a65      7 | Comment     | 11 |         |    0 | 00/8000               | * WILL BE STORED IN THE LOCATIONS SHOWN BELOW.
+    8 |  1 tcp_rdtime.a65      8 | Comment     | 11 |         |    0 | 00/8000               | * THIS EXAMPLE HAS BEEN ASSEMBLED AT $7000,
+    9 |  1 tcp_rdtime.a65      9 | Comment     | 11 |         |    0 | 00/8000               | * BUT YOU COULD ASSEMBLE A COPY TO BE RETURN
+   10 |  1 tcp_rdtime.a65     10 | Comment     | 11 |         |    0 | 00/8000               | * WHEREVER YOU CHOOSE.
+   11 |  1 tcp_rdtime.a65     11 | Comment     | 11 |         |    0 | 00/8000               | *********************************************************
+   12 |  1 tcp_rdtime.a65     12 | Empty       | 11 |         |    0 | 00/8000               |                                  
+   13 |  1 tcp_rdtime.a65     13 | Comment     | 11 |         |    0 | 00/8000               | *
+   14 |  1 tcp_rdtime.a65     14 | Comment     | 11 |         |    0 | 00/8000               | * UPD199OC REGISTER BIT DEFS
+   15 |  1 tcp_rdtime.a65     15 | Comment     | 11 |         |    0 | 00/8000               | *
+   16 |  1 tcp_rdtime.a65     16 | Empty       | 11 |         |    0 | 00/8000               |                                  
+   17 |  1 tcp_rdtime.a65     17 | Equivalence | 11 |         |    0 | 00/8000               | CREG        EQU   $c080          ; command reg addr
+   18 |  1 tcp_rdtime.a65     18 | Equivalence | 11 |         |    0 | 00/8000               | CLK         EQU   $2             ; clock on bit 1
+   19 |  1 tcp_rdtime.a65     19 | Equivalence | 11 |         |    0 | 00/8000               | STB         EQU   $4             ; strobe on bit 2
+   20 |  1 tcp_rdtime.a65     20 | Equivalence | 11 |         |    0 | 00/8000               | REGHLD      EQU   $0             ; register hold
+   21 |  1 tcp_rdtime.a65     21 | Equivalence | 11 |         |    0 | 00/8000               | REGSHF      EQU   $8             ; register shift
+   22 |  1 tcp_rdtime.a65     22 | Equivalence | 11 |         |    0 | 00/8000               | TIMRD       EQU   $18            ; time read
+   23 |  1 tcp_rdtime.a65     23 | Empty       | 11 |         |    0 | 00/8000               |                                  
+   24 |  1 tcp_rdtime.a65     24 | Empty       | 11 |         |    0 | 00/8000               |                                  
+   25 |  1 tcp_rdtime.a65     25 | Directive   | 11 |         |    0 | 00/8000               |             org   $7000          
+   26 |  1 tcp_rdtime.a65     26 | Empty       | 11 |         |    0 | 00/7000               |                                  
+   27 |  1 tcp_rdtime.a65     27 | Code        | 11 |         |    2 | 00/7000 : A9 01       |             LDA   #1             
+   28 |  1 tcp_rdtime.a65     28 | Code        | 11 |         |    3 | 00/7002 : 20 06 70    |             JSR   RDTIME         
+   29 |  1 tcp_rdtime.a65     29 | Code        | 11 |         |    1 | 00/7005 : 60          |             RTS                  
+   30 |  1 tcp_rdtime.a65     30 | Empty       | 11 |         |    0 | 00/7006               |                                  
+   31 |  1 tcp_rdtime.a65     31 | Empty       | 11 |         |    0 | 00/7006               |                                  
+   32 |  1 tcp_rdtime.a65     32 | Comment     | 11 |         |    0 | 00/7006               | * Enter with Slot # of Thunderclock in A register
+   33 |  1 tcp_rdtime.a65     33 | Empty       | 11 |         |    0 | 00/7006               |                                  
+   34 |  1 tcp_rdtime.a65     34 | Code        | 11 |         |    1 | 00/7006 : 0A          | RDTIME      ASL                  
+   35 |  1 tcp_rdtime.a65     35 | Code        | 11 |         |    1 | 00/7007 : 0A          |             ASL                  
+   36 |  1 tcp_rdtime.a65     36 | Code        | 11 |         |    1 | 00/7008 : 0A          |             ASL                  
+   37 |  1 tcp_rdtime.a65     37 | Code        | 11 |         |    1 | 00/7009 : 0A          |             ASL                  
+   38 |  1 tcp_rdtime.a65     38 | Code        | 11 |         |    1 | 00/700A : A8          |             TAY                  
+   39 |  1 tcp_rdtime.a65     39 | Code        | 11 |         |    2 | 00/700B : A9 18       |             LDA   #{$18}         ; strobe counters to shift register
+   40 |  1 tcp_rdtime.a65     40 | Code        | 11 |         |    3 | 00/700D : 20 21 70    |             JSR   SETCTL         
+   41 |  1 tcp_rdtime.a65     41 | Empty       | 11 |         |    0 | 00/7010               |                                  
+   42 |  1 tcp_rdtime.a65     42 | Code        | 11 |         |    2 | 00/7010 : A9 08       |             LDA   #{$8}          
+   43 |  1 tcp_rdtime.a65     43 | Code        | 11 |         |    3 | 00/7012 : 20 21 70    |             JSR   SETCTL         ; set shift mode
+   44 |  1 tcp_rdtime.a65     44 | Empty       | 11 |         |    0 | 00/7015               |                                  
+   45 |  1 tcp_rdtime.a65     45 | Code        | 11 |         |    2 | 00/7015 : A2 0A       |             LDX   #10            ; going to get 10 nibbles
+   46 |  1 tcp_rdtime.a65     46 | Code        | 11 |         |    3 | 00/7017 : 20 39 70    | GTNBL       JSR   SHIFT          ; get nibble
+   47 |  1 tcp_rdtime.a65     47 | Code        | 11 |         |    3 | 00/701A : 9D 71 70    |             STA   TIME-1,X       ; store time nibble
+   48 |  1 tcp_rdtime.a65     48 | Code        | 11 |         |    1 | 00/701D : CA          |             DEX                  
+   49 |  1 tcp_rdtime.a65     49 | Code        | 11 |         |    2 | 00/701E : D0 F7       |             BNE   GTNBL          ; branch if more
+   50 |  1 tcp_rdtime.a65     50 | Code        | 11 |         |    1 | 00/7020 : 60          |             RTS                  
+   51 |  1 tcp_rdtime.a65     51 | Empty       | 11 |         |    0 | 00/7021               |                                  
+   52 |  1 tcp_rdtime.a65     52 | Comment     | 11 |         |    0 | 00/7021               | ******************************************
+   53 |  1 tcp_rdtime.a65     53 | Comment     | 11 |         |    0 | 00/7021               | * SETCTL-STROBE command in A-reg
+   54 |  1 tcp_rdtime.a65     54 | Comment     | 11 |         |    0 | 00/7021               | * into the UPD1990. Hold Strobe high 
+   55 |  1 tcp_rdtime.a65     55 | Comment     | 11 |         |    0 | 00/7021               | * for 40Us minimum.
+   56 |  1 tcp_rdtime.a65     56 | Empty       | 11 |         |    0 | 00/7021               |                                  
+   57 |  1 tcp_rdtime.a65     57 | Code        | 11 |         |    3 | 00/7021 : 99 80 C0    | SETCTL      STA   {$c080},Y      ; setup CTL bits
+   58 |  1 tcp_rdtime.a65     58 | Code        | 11 |         |    2 | 00/7024 : 09 04       |             ORA   #{$4}          ; "or" in strobe
+   59 |  1 tcp_rdtime.a65     59 | Code        | 11 |         |    3 | 00/7026 : 99 80 C0    |             STA   {$c080},Y      ; raise strobe
+   60 |  1 tcp_rdtime.a65     60 | Code        | 11 |         |    3 | 00/7029 : 20 31 70    |             JSR   STBDLY         ; delay > 40us
+   61 |  1 tcp_rdtime.a65     61 | Code        | 11 |         |    2 | 00/702C : 49 04       |             EOR   #{$4}          ; clr strobe bit
+   62 |  1 tcp_rdtime.a65     62 | Code        | 11 |         |    3 | 00/702E : 99 80 C0    |             STA   {$c080},Y      ; drop strobe
+   63 |  1 tcp_rdtime.a65     63 | Empty       | 11 |         |    0 | 00/7031               |                                  
+   64 |  1 tcp_rdtime.a65     64 | Code        | 11 |         |    3 | 00/7031 : 20 34 70    | STBDLY      JSR   STBDL1         
+   65 |  1 tcp_rdtime.a65     65 | Code        | 11 |         |    1 | 00/7034 : 48          | STBDL1      PHA                  
+   66 |  1 tcp_rdtime.a65     66 | Code        | 11 |         |    1 | 00/7035 : 48          |             PHA                  
+   67 |  1 tcp_rdtime.a65     67 | Code        | 11 |         |    1 | 00/7036 : 68          |             PLA                  
+   68 |  1 tcp_rdtime.a65     68 | Code        | 11 |         |    1 | 00/7037 : 68          |             PLA                  ; KILL SOME TIME
+   69 |  1 tcp_rdtime.a65     69 | Code        | 11 |         |    1 | 00/7038 : 60          |             RTS                  
+   70 |  1 tcp_rdtime.a65     70 | Empty       | 11 |         |    0 | 00/7039               |                                  
+   71 |  1 tcp_rdtime.a65     71 | Comment     | 11 |         |    0 | 00/7039               | *******************************************
+   72 |  1 tcp_rdtime.a65     72 | Comment     | 11 |         |    0 | 00/7039               | * SHIFT - SHIFT DATA IN & OUT
+   73 |  1 tcp_rdtime.a65     73 | Comment     | 11 |         |    0 | 00/7039               | * ENTER WITH DATA TO BE SHIFTED IN
+   74 |  1 tcp_rdtime.a65     74 | Comment     | 11 |         |    0 | 00/7039               | * IN LOW 4 BITS OF A-REG.
+   75 |  1 tcp_rdtime.a65     75 | Comment     | 11 |         |    0 | 00/7039               | * DATA SHIFTED OUT RETURNED.
+   76 |  1 tcp_rdtime.a65     76 | Comment     | 11 |         |    0 | 00/7039               | * IN LOW 4 BITS OF A-REG.
+   77 |  1 tcp_rdtime.a65     77 | Empty       | 11 |         |    0 | 00/7039               |                                  
+   78 |  1 tcp_rdtime.a65     78 | Comment     | 11 |         |    0 | 00/7039               | * THIS ROUTINE WORKS TO READ AND WRITE,
+   79 |  1 tcp_rdtime.a65     79 | Comment     | 11 |         |    0 | 00/7039               | * DEPENDING ON HOW COMMAND REGISTER WAS
+   80 |  1 tcp_rdtime.a65     80 | Comment     | 11 |         |    0 | 00/7039               | * SET PRIOR TO CALLING SHIFT.
+   81 |  1 tcp_rdtime.a65     81 | Empty       | 11 |         |    0 | 00/7039               |                                  
+   82 |  1 tcp_rdtime.a65     82 | Code        | 11 |         |    1 | 00/7039 : 48          | SHIFT       PHA                  ; save DATA-IN NIBBLE
+   83 |  1 tcp_rdtime.a65     83 | Code        | 11 |         |    2 | 00/703A : A9 04       |             LDA   #4             
+   84 |  1 tcp_rdtime.a65     84 | Code        | 11 |         |    3 | 00/703C : 8D 6E 70    |             STA   TEMP1          ; 4 BITS/NIBBLE
+   85 |  1 tcp_rdtime.a65     85 | Code        | 11 |         |    2 | 00/703F : A9 00       |             LDA   #0             
+   86 |  1 tcp_rdtime.a65     86 | Code        | 11 |         |    3 | 00/7041 : 8D 70 70    |             STA   TEMP2          ; CLR DATA-OUT BYTE
+   87 |  1 tcp_rdtime.a65     87 | Empty       | 11 |         |    0 | 00/7044               |                                  
+   88 |  1 tcp_rdtime.a65     88 | Code        | 11 |         |    3 | 00/7044 : B9 80 C0    | SHLOOP      LDA   {$c080},Y      ; GET DATA-OUT BIT
+   89 |  1 tcp_rdtime.a65     89 | Code        | 11 |         |    1 | 00/7047 : 0A          |             ASL                  ; DATA-OUT BIT TO CARRY
+   90 |  1 tcp_rdtime.a65     90 | Code        | 11 |         |    3 | 00/7048 : 6E 70 70    |             ROR   TEMP2          ; COMBINE
+   91 |  1 tcp_rdtime.a65     91 | Code        | 11 |         |    1 | 00/704B : 68          |             PLA                  
+   92 |  1 tcp_rdtime.a65     92 | Code        | 11 |         |    1 | 00/704C : 48          |             PHA                  ; GET & RESAVE DATA-IN
+   93 |  1 tcp_rdtime.a65     93 | Code        | 11 |         |    2 | 00/704D : 29 01       |             AND   #1             ; BIT 0 ONLY
+   94 |  1 tcp_rdtime.a65     94 | Code        | 11 |         |    3 | 00/704F : 99 80 C0    |             STA   {$c080},Y      ; OUTPUT DATA
+   95 |  1 tcp_rdtime.a65     95 | Code        | 11 |         |    2 | 00/7052 : 09 02       |             ORA   #{$2}          
+   96 |  1 tcp_rdtime.a65     96 | Code        | 11 |         |    3 | 00/7054 : 99 80 C0    |             STA   {$c080},Y      ; RAISE CLOCK
+   97 |  1 tcp_rdtime.a65     97 | Code        | 11 |         |    2 | 00/7057 : 49 02       |             EOR   #{$2}          
+   98 |  1 tcp_rdtime.a65     98 | Code        | 11 |         |    3 | 00/7059 : 99 80 C0    |             STA   {$c080},Y      ; DROP CLOCK
+   99 |  1 tcp_rdtime.a65     99 | Code        | 11 |         |    1 | 00/705C : 68          |             PLA                  
+  100 |  1 tcp_rdtime.a65    100 | Code        | 11 |         |    1 | 00/705D : 6A          |             ROR                  ; SHIFT DATA-IN NEXT BIT
+  101 |  1 tcp_rdtime.a65    101 | Code        | 11 |         |    1 | 00/705E : 48          |             PHA                  ; SAVE
+  102 |  1 tcp_rdtime.a65    102 | Code        | 11 |         |    3 | 00/705F : CE 6E 70    |             DEC   TEMP1          ; DONE 4 BITS?
+  103 |  1 tcp_rdtime.a65    103 | Code        | 11 |         |    2 | 00/7062 : D0 E0       |             BNE   SHLOOP         ; BRANCH IF NOT
+  104 |  1 tcp_rdtime.a65    104 | Empty       | 11 |         |    0 | 00/7064               |                                  
+  105 |  1 tcp_rdtime.a65    105 | Code        | 11 |         |    1 | 00/7064 : 68          |             PLA                  ; ADJUST STACK
+  106 |  1 tcp_rdtime.a65    106 | Code        | 11 |         |    3 | 00/7065 : AD 70 70    |             LDA   TEMP2          ; GET DATA-OUT NIBBLE
+  107 |  1 tcp_rdtime.a65    107 | Code        | 11 |         |    1 | 00/7068 : 18          |             CLC                  
+  108 |  1 tcp_rdtime.a65    108 | Code        | 11 |         |    1 | 00/7069 : 6A          | ROR4        ROR                  
+  109 |  1 tcp_rdtime.a65    109 | Code        | 11 |         |    1 | 00/706A : 6A          |             ROR                  
+  110 |  1 tcp_rdtime.a65    110 | Code        | 11 |         |    1 | 00/706B : 6A          |             ROR                  
+  111 |  1 tcp_rdtime.a65    111 | Code        | 11 |         |    1 | 00/706C : 6A          |             ROR                  ; RIGHT JUSTIFY IN THE BYTE
+  112 |  1 tcp_rdtime.a65    112 | Code        | 11 |         |    1 | 00/706D : 60          |             RTS                  
+  113 |  1 tcp_rdtime.a65    113 | Empty       | 11 |         |    0 | 00/706E               |                                  
+  114 |  1 tcp_rdtime.a65    114 | Data        | 11 |         |    2 | 00/706E : 00 00       | TEMP1       DW    0              
+  115 |  1 tcp_rdtime.a65    115 | Data        | 11 |         |    2 | 00/7070 : 00 00       | TEMP2       DW    0              
+  116 |  1 tcp_rdtime.a65    116 | Empty       | 11 |         |    0 | 00/7072               |                                  
+  117 |  1 tcp_rdtime.a65    117 | Comment     | 11 |         |    0 | 00/7072               | ****************************************
+  118 |  1 tcp_rdtime.a65    118 | Comment     | 11 |         |    0 | 00/7072               | * UPON RETURN FROM THE SUBROUTINE
+  119 |  1 tcp_rdtime.a65    119 | Comment     | 11 |         |    0 | 00/7072               | * CALL TO RDTIME, THE TIME WILL BE STORED IN THE
+  120 |  1 tcp_rdtime.a65    120 | Comment     | 11 |         |    0 | 00/7072               | * LOCATIONS BELOW.
+  121 |  1 tcp_rdtime.a65    121 | Comment     | 11 |         |    0 | 00/7072               | ****************************************
+  122 |  1 tcp_rdtime.a65    122 | Empty       | 11 |         |    0 | 00/7072               |                                  
+  123 |  1 tcp_rdtime.a65    123 | Empty       | 11 |         |    0 | 00/7072               | TIME                             
+  124 |  1 tcp_rdtime.a65    124 | Comment     | 11 |         |    0 | 00/7072               | *
+  125 |  1 tcp_rdtime.a65    125 | Data        | 11 |         |    2 | 00/7072 : 00 00       | MONTH       DW    0              ; MONTH (1-12 BINARY)
+  126 |  1 tcp_rdtime.a65    126 | Data        | 11 |         |    2 | 00/7074 : 00 00       | DOW         DW    0              ; DAY-OF-WEEK (0-6 BCD, 0=SUNDAY)
+  127 |  1 tcp_rdtime.a65    127 | Comment     | 11 |         |    0 | 00/7076               | *
+  128 |  1 tcp_rdtime.a65    128 | Data        | 11 |         |    2 | 00/7076 : 00 00       | DATEMS      DW    0              ; DATE TENS (0-3 BCD)
+  129 |  1 tcp_rdtime.a65    129 | Data        | 11 |         |    2 | 00/7078 : 00 00       | DATELS      DW    0              ; DATE UNITS (0-9 BCD)
+  130 |  1 tcp_rdtime.a65    130 | Comment     | 11 |         |    0 | 00/707A               | *
+  131 |  1 tcp_rdtime.a65    131 | Data        | 11 |         |    2 | 00/707A : 00 00       | HRMS        DW    0              ; HOUR TENS (0-2 BCD)
+  132 |  1 tcp_rdtime.a65    132 | Data        | 11 |         |    2 | 00/707C : 00 00       | HRLS        DW    0              ; HOUR UNITS (0-9 BCD)
+  133 |  1 tcp_rdtime.a65    133 | Comment     | 11 |         |    0 | 00/707E               | *
+  134 |  1 tcp_rdtime.a65    134 | Data        | 11 |         |    2 | 00/707E : 00 00       | MINMS       DW    0              ; MINUTE TENS (0-5 BCD)
+  135 |  1 tcp_rdtime.a65    135 | Data        | 11 |         |    2 | 00/7080 : 00 00       | MINLS       DW    0              ; MINUTE UNITS (0-9 BCD)
+  136 |  1 tcp_rdtime.a65    136 | Comment     | 11 |         |    0 | 00/7082               | *
+  137 |  1 tcp_rdtime.a65    137 | Data        | 11 |         |    2 | 00/7082 : 00 00       | SECMS       DW    0              ; SECOND TENS (0-5 BCD)
+  138 |  1 tcp_rdtime.a65    138 | Data        | 11 |         |    2 | 00/7084 : 00 00       | SECLS       DW    0              ; SECOND UNITS (0-9 BCD)
+  139 |  1 tcp_rdtime.a65    139 | Empty       | 11 |         |    0 | 00/7086               |                                  
+------+--------------------------+-------------+----+---------+------+-----------------------+-------------------------------------------------------------------

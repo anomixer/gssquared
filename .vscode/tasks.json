@@ -1,0 +1,109 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-debug",
+            "type": "shell",
+            "command": "cmake -DDEV_MODE=ON -DCMAKE_BUILD_TYPE=Debug -S . -B build && cmake --build build --parallel",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "build-gs2-debug",
+            "type": "shell",
+            "command": "cmake -DDEV_MODE=ON -DCMAKE_BUILD_TYPE=Debug -S . -B build && cmake --build build --parallel --target GSSquared",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "build-gs2-debug-win",
+            "type": "shell",
+            "command": "export PATH=/c/msys64/mingw64/bin:$PATH && cmake -DDEV_MODE=ON -DCMAKE_BUILD_TYPE=Debug -S . -B build && cmake --build build --parallel --target GSSquared",
+            "options": {
+                "shell": {
+                    "executable": "C:/msys64/usr/bin/bash.exe",
+                    "args": ["-c"]
+                }
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "build-cycletest-debug",
+            "type": "shell",
+            "command": "cmake -DDEV_MODE=ON -DCMAKE_BUILD_TYPE=Debug -S . -B build && cmake --build build --target cycletest",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "build-release",
+            "type": "shell",
+            "command": "cmake -DDEV_MODE=ON -DCMAKE_BUILD_TYPE=Release -S . -B build && cmake --build build --parallel",
+            "group": "build"
+        },
+        {
+            "label": "build-release-with-debug",
+            "type": "shell",
+            "command": "cmake -DDEV_MODE=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo -S . -B build && cmake --build build --parallel",
+            "group": "build"
+        },
+        {
+            "label": "profile-with-instruments",
+            "type": "shell",
+            "command": "xcrun xctrace record --template 'CPU Profiler' --no-prompt --output /tmp/mmutest_profile_$(date +%Y%m%d_%H%M%S).trace --target-stdout - --launch -- ${workspaceFolder}/build/mmutest && open /tmp/mmutest_profile_*.trace",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            }
+        },
+        {
+            "label": "profile-gssquared-with-instruments",
+            "type": "shell",
+            "command": "xcrun xctrace record --template 'CPU Profiler' --no-prompt --output /tmp/gssquared_profile_$(date +%Y%m%d_%H%M%S).trace --target-stdout - --launch -- ${workspaceFolder}/build/GSSquared && open /tmp/gssquared_profile_*.trace",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            }
+        },
+        {
+            "label": "profile-mmutest-manual",
+            "type": "shell",
+            "command": "xcrun xctrace record --template 'CPU Profiler' --no-prompt --output /tmp/mmutest_profile_$(date +%Y%m%d_%H%M%S).trace --target-stdout - --launch -- ${workspaceFolder}/build/mmutest",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "dependsOn": "build-release-with-debug"
+        },
+        {
+            "label": "profile-gssquared-manual",
+            "type": "shell",
+            "command": "xcrun xctrace record --template 'CPU Profiler' --no-prompt --output /tmp/gssquared_profile_$(date +%Y%m%d_%H%M%S).trace --target-stdout - --launch -- ${workspaceFolder}/build/GSSquared",
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "dependsOn": "build-release-with-debug"
+        }
+    ]
+}

@@ -1,0 +1,92 @@
+#include "computer.hpp"
+#include "SlotData.hpp"
+#include "RTC.hpp"
+#include "rtc_pram.hpp"
+#include "util/DebugHandlerIDs.hpp"
+#include "debug.hpp"
+#include "paths.hpp"
+
+#include <filesystem>
+#include <iostream>
+#include <string>
+
+void rtc_pram_write_C033(void *context, uint32_t address, uint8_t value) {
+    rtc_pram_state_t *st = (rtc_pram_state_t *)context;
+    if (DEBUG(DEBUG_RTC)) printf("write_c033: %02X\n", value);
+    st->rtc->write_data_reg(value);
+}
+
+uint8_t rtc_pram_read_C033(void *context, uint32_t address) {
+    rtc_pram_state_t *st = (rtc_pram_state_t *)context;
+    uint8_t val = st->rtc->read_data_reg();
+    if (DEBUG(DEBUG_RTC)) printf("read_c033: %02X\n", val);
+    return val;
+}
+
+void rtc_pram_write_C034(void *context, uint32_t address, uint8_t value) {
+    rtc_pram_state_t *st = (rtc_pram_state_t *)context;
+    if (DEBUG(DEBUG_RTC)) printf("rtc_pram_write_c034: %02X border color: %02X\n", value, value & 0x0F);
+
+    st->rtc->write_control_reg(value >> 5);
+}
+
+uint8_t rtc_pram_read_C034(void *context, uint32_t address) {
+    rtc_pram_state_t *st = (rtc_pram_state_t *)context;
+
+    uint8_t rtcval = st->rtc->read_control_reg();
+    if (DEBUG(DEBUG_RTC)) printf("read_c034: %02X\n", (rtcval << 5));
+
+    return (rtcval << 5);
+}
+
+DebugFormatter *rtc_pram_debug_display(void *context) {
+    rtc_pram_state_t *st = (rtc_pram_state_t *)context;
+    return st->rtc->debug_display();
+}
+
+void init_slot_rtc_pram(computer_t *computer, SlotType_t slot) {
+
+    rtc_pram_state_t *st = new rtc_pram_state_t();
+
+    std::string bram_path;
+    const std::string& mid = computer->get_machine_id();
+    if (!mid.empty()) {
+        Paths::calc_pref(bram_path, "bram/" + mid + ".bin");
+    } else {
+        Paths::calc_pref(bram_path, "bram/default.bin");
+    }
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::create_directories(fs::path(bram_path).parent_path(), ec);
+        if (ec) {
+            std::cerr << "Failed to create bram directory: " << ec.message() << std::endl;
+        }
+    }
+    st->rtc = new RTC(bram_path);
+    
+    computer->mmu->set_C0XX_write_handler(0xC033, { rtc_pram_write_C033, st });
+    computer->mmu->set_C0XX_read_handler(0xC033, { rtc_pram_read_C033, st });
+
+    // Get existing C034 handlers - will be from display.
+    /* computer->mmu->get_C0XX_write_handler(0xC034, st->display_wr_handler);
+    computer->mmu->get_C0XX_read_handler(0xC034, st->display_rd_handler); */
+
+    computer->mmu->set_C0XX_write_handler(0xC034, { rtc_pram_write_C034, st });
+    computer->mmu->set_C0XX_read_handler(0xC034, { rtc_pram_read_C034, st });
+    
+    computer->register_shutdown_handler([st]() {
+        delete st->rtc;
+        delete st;
+        return true;
+    });
+
+    computer->register_debug_display_handler(
+        "rtc",
+        DH_RTC_PRAM, // unique ID for this, need to have in a header.
+        [st]() -> DebugFormatter * {
+            return rtc_pram_debug_display(st);
+        }
+    );
+
+}

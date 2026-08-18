@@ -1,0 +1,114 @@
+site_name: GSSquared Documentation
+repo_url: https://github.com/jawaidbazyar2/gssquared
+repo_name: jawaidbazyar2/gssquared
+docs_dir: Docs
+site_dir: site
+
+nav:
+  - Overview: Documentation.md
+  - Roadmap: Roadmap.md
+
+  - User Guide:
+    - Getting Started: index.md
+    - Menus: Menus.md
+    - Selecting a System: Select.md
+    - On Screen Display (OSD): OSD.md
+    - Using a Keyboard: KeyboardShortcuts.md
+    - Using a Mouse: Mouse.md
+    - Joysticks: Joysticks.md
+    - Displays: Displays.md
+    - Storage & Disks: Storage.md
+
+  - Supported Systems:
+    - Apple IIe: AppleIIe.md
+    - Apple IIc: AppleIIc.md
+    - Apple IIgs: AppleIIgs.md
+    - Apple III: AppleIII.md
+    - Compatibility (II/IIe/IIc): Compatibility.md
+    - Compatibility (IIgs): CompatibilityGS.md
+
+  - Cards & Devices:
+    - Disk II: DiskII.md
+    - SmartPort: SmartPort.md
+    - IWM: IWM.md
+    - ProDOS Block: ProDOS_Block.md
+    - Apple Mouse Card: AppleMouse.md
+    - Apple Memory Expansion: AppleMemoryExpansionCard.md
+    - Mockingboard: Mockingboard.md
+    - Ensoniq ES5503: Ensoniq5503.md
+    - MIDI: MIDI.md
+    - Networking: Networking.md
+    - Parallel Port: Parallel.md
+    - Serial (SCC8530): SCC8530_Serial.md
+    - Clock Card: Clock.md
+    - Thunderclock: Thunderclock.md
+    - GS Clock & Battery RAM: GSClockBatteryRAM.md
+    - Video Term: VideoTerm.md
+    - Epson MX-80: EpsonMX80.md
+    - Imagewriter: Imagewriter.md
+    - ADB: ADB.md
+    - Joyport: Joyport.md
+    - WDM: WDM.md
+
+  - Internals:
+    - CPUs: CPUs.md
+    - 65816: 65816.md
+    - MMU: MMU.md
+    - Apple IIgs Memory: AppleIIgs-Memory.md
+    - Hi-Res Graphics: HiRes.md
+    - Double Hi-Res: DoubleHiRes.md
+    - Display (Next Gen): DisplayNG.md
+    - Display (Post-Processing): DisplayPP.md
+    - Video Scanner: VideoScanner.md
+    - PAL: PAL.md
+    - XRGB: XRGB.md
+    - C800-CFFF: C800-CFFF.md
+    - Run Loop: runloop.md
+    - App Callbacks: AppCallbacks.md
+    - Power-On States: PowerOnStates.md
+    - IIgs Diagnostics: AppleIIgsDiagnostics.md
+    - Tracing: Tracing.md
+    - Mockingboard Bug Analysis: MockingboardBugAnalysis.md
+    - CPU Refactor Notes: CPURefactor.md
+    - State Refactor Notes: StateRefactor.md
+    - UI Notes: UI.md
+
+  - Misc:
+    - User Interface: UserInterface.md
+    - Control Overlay: ControlOverlay.md
+    - Clipboard: Clipboard.md
+    - Save & Restore State: SaveAndRestore.md
+    - Debugger: Debugger.md
+
+  - Development Journal: DevelopLog.md
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: light green
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: green
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - fenced_code

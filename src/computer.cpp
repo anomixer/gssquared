@@ -1,0 +1,723 @@
+#include <iostream>
+#include <cstdint>
+
+#include "PlatformIDs.hpp"
+#include "SDL3/SDL_keycode.h"
+#include "cpu.hpp"
+#include "NClock.hpp"
+#include "computer.hpp"
+#include "debugger/debugwindow.hpp"
+#include "debugger/BreakpointTable.hpp"
+#include "util/EventDispatcher.hpp"
+#include "util/EventTimer.hpp"
+#include "videosystem.hpp"
+#include "util/mount.hpp"
+#include "platforms.hpp"
+#include "mbus/MessageBus.hpp"
+#include "util/DebugFormatter.hpp"
+#include "util/applekeys.hpp"
+#include "gs2.hpp"
+#include "platform-specific/menu.h"
+#include "devices/keyboard/keyboard.hpp"
+#include "devices/game/gamecontroller.hpp"
+#include "util/InterruptController.hpp"
+#include "util/ResetController.hpp"
+#include "util/DebugHandlerIDs.hpp"
+#include "util/AudioSystem.hpp"
+#include "util/SoundEffect.hpp"
+#include "util/printf_helper.hpp"
+#include "paths.hpp"
+#include "slots.hpp"
+#include "util/Connections.hpp"
+#include "util/mount.hpp"
+
+computer_t::computer_t(NClockII *clock) {
+    this->clock = clock;
+    breakpoints = new BreakpointTable();
+
+    // initialize module store to nullptr.
+    for (int i = 0; i < MODULE_NUM_MODULES; i++) {
+        module_store[i] = nullptr;
+    }
+
+    // lots of stuff is going to need this.
+    event_queue = new EventQueue();
+    if (!event_queue) {
+        std::cerr << "Failed to allocate event queue for CPU " << std::endl;
+        exit(1);
+    }
+
+    mbus = new MessageBus();
+
+    // allocate IRQ controller
+    irq_control = new InterruptController();
+    // On update, force change in CPU.
+    irq_control->register_irq_receiver([this](bool irq_asserted) {
+        cpu->irq_asserted = irq_asserted;
+    });
+    register_debug_display_handler(
+        "irq",
+        DH_IRQ, // unique ID for this, need to have in a header.
+        [this]() -> DebugFormatter * {
+            return irq_control->debug_irq();
+        }
+    );
+
+    reset_control = new ResetController();
+    reset_control->register_reset_receiver([this](uint64_t reset_asserted) {
+        uint64_t old = cpu->reset_asserted;
+        cpu->reset_asserted = reset_asserted;
+        if ((reset_asserted) && (!old)) { // if reset was NOT asserted, but now is, call reset() chain.
+            reset(false);
+        } else last_reset = this->clock->get_cycles(); // catch deassert
+    });
+
+    sys_event = new EventDispatcher(); // different queue for "system" events that get processed first.
+    dispatch = new EventDispatcher(); // has to be very first thing, devices etc are going to immediately register handlers.
+    device_frame_dispatcher = new DeviceFrameDispatcher();
+
+    audio_system = new AudioSystem(this);
+    sound_effect = new SoundEffect(audio_system);
+
+    cpu = new cpu_state(PROCESSOR_6502); // default to 6502, then we will override later.
+
+    //  clock needs to be set before here
+    event_timer = new EventTimer(clock); // runs at 14MHz clock speed.
+    vid_event_timer = new EventTimer(clock); // runs at video clock speed (always 1MHz)
+    cpu_event_timer = new EventTimer(clock); // runs at cpu clock speed.
+
+    slot_manager = new SlotManager_t();
+    mounts = new Mounts();
+    connections = new Connections(event_queue, device_frame_dispatcher);
+
+    video_system = new video_system_t(this);
+    debug_window = new debug_window_t(this);
+
+    sys_event->registerHandler(SDL_EVENT_MOUSE_BUTTON_DOWN,[this](const SDL_Event &event ) {
+        if (event.button.button == SDL_BUTTON_RIGHT && gs2_app_values.right_mouse_accelerate) {
+            old_speed = this->clock->get_clock_mode();
+            if (old_speed == CLOCK_FREE_RUN) {
+                ludicrous_saved_n = this->clock->get_cpu_per_14m();
+            }
+            this->clock->set_clock_mode(CLOCK_14_3MHZ);
+            return true;
+        }
+        return false;
+    });
+    sys_event->registerHandler(SDL_EVENT_MOUSE_BUTTON_UP,[this](const SDL_Event &event ) {
+        if (event.button.button == SDL_BUTTON_RIGHT && gs2_app_values.right_mouse_accelerate) {
+            this->clock->set_clock_mode(old_speed);
+            if (old_speed == CLOCK_FREE_RUN) {
+                this->clock->set_cpu_per_14m(ludicrous_saved_n);
+            }
+            return true;
+        }
+        return false;
+    });
+    
+    sys_event->registerHandler(SDL_EVENT_KEY_DOWN, [this](const SDL_Event &event) {
+        int key = event.key.key;
+        SDL_Keymod mod = event.key.mod;
+
+        if (key == SDLK_F9) { 
+            return true; // eat the keydown
+        } else if (key == SDLK_INSERT) {
+            if (event.key.repeat == 1) return false; // ignore repeats otherwise it will forget the original speed
+            old_speed = this->clock->get_clock_mode();
+            if (old_speed == CLOCK_FREE_RUN) {
+                ludicrous_saved_n = this->clock->get_cpu_per_14m();
+            }
+            this->clock->set_clock_mode(CLOCK_14_3MHZ);
+            return true;
+        }
+        return false;
+    });
+    sys_event->registerHandler(SDL_EVENT_KEY_UP, [this](const SDL_Event &event) {
+        int key = event.key.key;
+        SDL_Keymod mod = event.key.mod;
+        if (key == SDLK_F9) { 
+            this->speed_shift = true;
+            if (mod & SDL_KMOD_SHIFT) {
+                this->speed_new = this->clock->toggle(-1);
+            } else {
+                this->speed_new = this->clock->toggle(1);
+            }
+            send_clock_mode_message(speed_new);
+            return true; 
+        } else if (key == SDLK_INSERT) {
+            this->clock->set_clock_mode(old_speed);
+            if (old_speed == CLOCK_FREE_RUN) {
+                this->clock->set_cpu_per_14m(ludicrous_saved_n);
+            }
+            return true;
+        }
+        return false;
+    });
+
+    /* sys_event->registerHandler(SDL_EVENT_QUIT, [this](const SDL_Event &event) {
+        cpu->halt = HLT_USER;
+        return true;
+    }); */
+    sys_event->registerHandler(gs2_app_values.menu_event_type, [this](const SDL_Event &event) {
+        switch (event.user.code) {
+            case MENU_MACHINE_RESET:
+                reset(false);
+                return true;
+            case MENU_MACHINE_RESTART:
+                reset(true);
+                return true;
+            case MENU_MACHINE_PAUSE_RESUME:
+                execution_mode = (execution_mode == EXEC_PAUSED) ? EXEC_NORMAL : EXEC_PAUSED;
+                return true;
+            case MENU_MACHINE_CAPTURE_MOUSE:
+                video_system->display_capture_mouse_message(true);
+                return true;
+            case MENU_SPEED_1_0:
+                speed_new = CLOCK_1_024MHZ; speed_shift = true;
+                send_clock_mode_message(speed_new);
+                return true;
+            case MENU_SPEED_2_8:
+                speed_new = CLOCK_2_8MHZ; speed_shift = true;
+                send_clock_mode_message(speed_new);
+                return true;
+            case MENU_SPEED_7_1:
+                speed_new = CLOCK_7_159MHZ; speed_shift = true;
+                send_clock_mode_message(speed_new);
+                return true;
+            case MENU_SPEED_14_3:
+                speed_new = CLOCK_14_3MHZ; speed_shift = true;
+                send_clock_mode_message(speed_new);
+                return true;
+            case MENU_MONITOR_COMPOSITE:
+                video_system->set_display_engine(DM_ENGINE_NTSC);
+                return true;
+            case MENU_MONITOR_GS_RGB:
+                video_system->set_display_engine(DM_ENGINE_RGB);
+                return true;
+            case MENU_MONITOR_MONO_GREEN:
+                video_system->set_display_engine(DM_ENGINE_MONO);
+                video_system->set_display_mono_color(DM_MONO_GREEN);
+                return true;
+            case MENU_MONITOR_MONO_AMBER:
+                video_system->set_display_engine(DM_ENGINE_MONO);
+                video_system->set_display_mono_color(DM_MONO_AMBER);
+                return true;
+            case MENU_MONITOR_MONO_WHITE:
+                video_system->set_display_engine(DM_ENGINE_MONO);
+                video_system->set_display_mono_color(DM_MONO_WHITE);
+                return true;
+            case MENU_DISPLAY_FULLSCREEN:
+                video_system->toggle_fullscreen();
+                send_full_screen_message();
+                return true;
+            case MENU_EDIT_COPY_SCREEN:
+                video_system->copy_screen();
+                return true;
+            case MENU_FILE_SAVE_SCREENSHOT:
+                video_system->save_screenshot();
+                return true;
+            case MENU_FILE_MOUNT_DRIVERS:
+                toggle_mount_drivers();
+                return true;
+            case MENU_EDIT_PASTE_TEXT: {
+                keyboard_state_t *kb = (keyboard_state_t *)get_module_state(MODULE_KEYBOARD);
+                if (kb) {
+                    char *text = SDL_GetClipboardText();
+                    if (text) {
+                        kb->paste_buffer = std::string(text);
+                        SDL_free(text);
+                    }
+                }
+                return true;
+            }
+            case MENU_OPEN_DEBUG_WINDOW:
+                debug_window->set_open();
+                return true;
+            case MENU_CONTROLLER_GAMEPAD:
+            case MENU_CONTROLLER_MOUSE:
+            case MENU_CONTROLLER_JOYPORT: {
+                gamec_state_t *gc = (gamec_state_t *)get_module_state(MODULE_GAMECONTROLLER);
+                if (gc) {
+                    joystick_mode_t mode = (event.user.code == MENU_CONTROLLER_GAMEPAD) ? JOYSTICK_APPLE_GAMEPAD
+                                        : (event.user.code == MENU_CONTROLLER_MOUSE)   ? JOYSTICK_APPLE_MOUSE
+                                                                                        : JOYSTICK_ATARI_DPAD;
+                    set_joystick_mode(gc, mode);
+                }
+                return true;
+            }
+        }
+        return false;
+    });
+
+    // TODO: it might be nice to, after this is done, remove ourselves from the device_frame_dispatcher.
+    device_frame_dispatcher->registerHandler(
+        [this]() {
+            if (powerup_reset_cycles > 0) {
+                powerup_reset_cycles--;
+                if (powerup_reset_cycles == 0) {
+                    reset_control->assert_reset((device_reset_id)RST_ID_POWERUP, false);
+                }
+            }
+            return true;
+        }
+    );
+
+}
+
+computer_t::~computer_t() {
+    // Unwire and destroy SerialDevices while chip/card state is still alive.
+    if (connections) {
+        connections->clear();
+    }
+    for (auto& handler : shutdown_handlers) {
+        handler();
+    }
+    delete connections;
+    connections = nullptr;
+    delete mounts;
+    mounts = nullptr;
+    delete cpu;
+    delete sound_effect;
+    delete audio_system;
+    delete irq_control;
+    delete reset_control;
+    delete video_system;
+    delete debug_window;
+    delete breakpoints;
+    delete event_timer;
+    delete sys_event;
+    delete dispatch;
+    delete device_frame_dispatcher;
+}
+
+void computer_t::set_frame_start_cycle() {
+    frame_start_cycle = clock->get_c14m();
+}
+
+void computer_t::register_reset_handler(ResetHandler handler) {
+    reset_handlers.push_back(handler);
+}
+
+void computer_t::register_shutdown_handler(ShutdownHandler handler) {
+    shutdown_handlers.push_back(handler);
+}
+
+void computer_t::register_debug_display_handler(std::string name, uint64_t id, DebugDisplayHandler handler) {
+    debug_display_handlers.push_back({name, id, handler});
+}
+
+DebugFormatter *computer_t::call_debug_display_handler(std::string name) {
+    for (auto& handler : debug_display_handlers) {
+        if (handler.name == name) {
+            return handler.handler();
+        }
+    }
+    return 0;
+}
+
+void computer_t::register_device_debug(device_id id, DeviceDebugHandler handler) {
+    if (id <= DEVICE_ID_NONE || id >= NUM_DEVICE_IDS) {
+        return;
+    }
+    device_debug_handlers[id] = std::move(handler);
+}
+
+bool computer_t::call_device_debug(device_id id, uint32_t op,
+                                  const std::vector<uint8_t> &req,
+                                  std::vector<uint8_t> &reply,
+                                  std::string &err) {
+    if (id <= DEVICE_ID_NONE || id >= NUM_DEVICE_IDS) {
+        err = "unknown device";
+        return false;
+    }
+    DeviceDebugHandler &handler = device_debug_handlers[id];
+    if (!handler) {
+        err = "unknown device";
+        return false;
+    }
+    return handler(op, req, reply, err);
+}
+
+void computer_t::reset(bool cold_start) {
+    last_reset = clock->get_cycles(); // catch this here (assert or instantaneous)
+    if (cold_start) {
+        // Invalidate Apple II soft-entry / power-up bytes ($3F2–$3F4).
+        // On II/IIe, computer->mmu is the only map. On IIgs, computer->mmu is
+        // the Mega II (bank $E0) while the CPU's MMU is the FPI — ROM 03 (and
+        // the Check Startup Device path) consults bank $00, so clear both.
+        // on a ROM03 the ROM uses CYAREG bit 6 which is not quite the same concept here.
+        mmu->write(0x3f2, 0x00);
+        mmu->write(0x3f3, 0x00);
+        mmu->write(0x3f4, 0x00);
+    }
+
+    mmu->reset(cold_start); // this first, so when CPU fetches PC from RESET it will be based on main memory/rom.
+    cpu->reset();
+    
+    for (auto& handler : reset_handlers) {
+        handler(cold_start);
+    }
+}
+
+void computer_t::set_clock(NClockII *clock) {
+    this->clock = clock;
+    event_timer->set_clock(clock);
+}
+
+/** State storage for non-slot devices. */
+void *computer_t::get_module_state(module_id_t module_id) {
+    void *state = module_store[module_id];
+    if (state == nullptr) {
+        fprintf(stderr, "Module %d not initialized\n", module_id);
+    }
+    return state;
+}
+
+void computer_t::set_module_state(module_id_t module_id, void *state) {
+    module_store[module_id] = state;
+}
+
+// TODO: should live inside a reconstituted clock class.
+void computer_t::send_clock_mode_message(clock_mode_t clock_mode) {
+    static char buffer[256];
+
+    snprintf(buffer, sizeof(buffer), "Clock Mode Set to %s", clock->get_clock_mode_name(clock_mode)); // 
+    event_queue->addEvent(new Event(EVENT_SHOW_MESSAGE, 0, buffer));
+}
+
+void computer_t::begin_ludicrous_calibration() {
+    ludicrous_cal_state = LS_CAL_PROBE;
+    ludicrous_slip_streak = 0;
+    ludicrous_stable_frames = 0;
+#ifdef LUDICROUS_BINARY_SEARCH_PROBE
+    ludicrous_search_low = LUDICROUS_CPU_PER_14M_MIN;
+    ludicrous_search_high = LUDICROUS_CPU_PER_14M_MAX;
+    ludicrous_search_best = LUDICROUS_CPU_PER_14M_MIN;
+    ludicrous_search_samples = 0;
+    ludicrous_search_idle_sum = 0.0f;
+    ludicrous_search_slipped = false;
+    ludicrous_search_cycle_sum = 0;
+    ludicrous_plateau_target_cycles = 0;
+    ludicrous_searching_plateau = false;
+    clock->set_cpu_per_14m(
+        (ludicrous_search_low + ludicrous_search_high) / 2);
+#else
+    // Probe measures at 1 CPU per 14M; N is chosen after one wall-timed frame.
+    clock->set_cpu_per_14m(1);
+#endif
+}
+
+void computer_t::update_ludicrous_calibration(
+    bool modal_tracking, uint64_t cpu_cycles_this_frame) {
+    if (clock->get_clock_mode() != CLOCK_FREE_RUN) {
+        if (ludicrous_cal_state != LS_CAL_IDLE) {
+            ludicrous_cal_state = LS_CAL_IDLE;
+            ludicrous_slip_streak = 0;
+            ludicrous_stable_frames = 0;
+        }
+        return;
+    }
+    if (ludicrous_cal_state == LS_CAL_IDLE) {
+        return;
+    }
+    if (ludicrous_cal_state == LS_CAL_LOCKED) {
+        return; // session-sticky; dialogs must not change N
+    }
+
+#ifdef LUDICROUS_BINARY_SEARCH_PROBE
+    if (ludicrous_cal_state == LS_CAL_PROBE) {
+        if (modal_tracking) {
+            return;
+        }
+
+        ludicrous_search_samples++;
+        ludicrous_search_idle_sum += idle_percent;
+        ludicrous_search_slipped |= frame_slipped;
+        ludicrous_search_cycle_sum += cpu_cycles_this_frame;
+
+        // Average several complete frames so a single noisy frame does not
+        // decide which half of the search space to discard.
+        if (ludicrous_search_samples < 3) {
+            return;
+        }
+
+        uint32_t candidate = clock->get_cpu_per_14m();
+        float average_idle =
+            ludicrous_search_idle_sum / (float)ludicrous_search_samples;
+        uint64_t average_cycles =
+            ludicrous_search_cycle_sum / ludicrous_search_samples;
+
+        if (ludicrous_searching_plateau) {
+            if (ludicrous_plateau_target_cycles == 0) {
+                // The fastest sustainable N defines the plateau. Find the
+                // smallest N that still delivers at least 95% of its CPU work.
+                ludicrous_plateau_target_cycles =
+                    (average_cycles * 95) / 100;
+                ludicrous_search_low = LUDICROUS_CPU_PER_14M_MIN;
+                ludicrous_search_high =
+                    (ludicrous_search_best > LUDICROUS_CPU_PER_14M_MIN)
+                        ? ludicrous_search_best - 1
+                        : 0;
+
+                fprintf(stdout,
+                    "Ludicrous plateau: N=%u delivers %llu cycles/frame; "
+                    "target=%llu (95%%)\n",
+                    candidate,
+                    (unsigned long long)average_cycles,
+                    (unsigned long long)ludicrous_plateau_target_cycles);
+
+                ludicrous_search_samples = 0;
+                ludicrous_search_idle_sum = 0.0f;
+                ludicrous_search_slipped = false;
+                ludicrous_search_cycle_sum = 0;
+
+                if (ludicrous_search_low <= ludicrous_search_high) {
+                    uint32_t next =
+                        (ludicrous_search_low + ludicrous_search_high) / 2;
+                    clock->set_cpu_per_14m(next);
+                } else {
+                    clock->set_cpu_per_14m(ludicrous_search_best);
+                    ludicrous_cal_state = LS_CAL_DROPPING;
+                }
+                return;
+            }
+
+            bool reaches_plateau =
+                !ludicrous_search_slipped &&
+                average_cycles >= ludicrous_plateau_target_cycles;
+
+            fprintf(stdout,
+                "Ludicrous plateau search: N=%u cycles/frame=%llu "
+                "target=%llu -> %s\n",
+                candidate,
+                (unsigned long long)average_cycles,
+                (unsigned long long)ludicrous_plateau_target_cycles,
+                reaches_plateau ? "plateau" : "below");
+
+            if (reaches_plateau) {
+                ludicrous_search_best = candidate;
+                ludicrous_search_high =
+                    (candidate > LUDICROUS_CPU_PER_14M_MIN)
+                        ? candidate - 1
+                        : 0;
+            } else {
+                ludicrous_search_low = candidate + 1;
+            }
+        } else {
+            bool fits =
+                !ludicrous_search_slipped && average_idle >= 15.0f;
+
+            fprintf(stdout,
+                "Ludicrous capacity search: N=%u idle=%5.1f%% "
+                "slips=%s -> %s\n",
+                candidate, average_idle,
+                ludicrous_search_slipped ? "yes" : "no",
+                fits ? "fits" : "too fast");
+
+            if (fits) {
+                ludicrous_search_best = candidate;
+                ludicrous_search_low = candidate + 1;
+            } else {
+                ludicrous_search_high =
+                    (candidate > LUDICROUS_CPU_PER_14M_MIN)
+                        ? candidate - 1
+                        : 0;
+            }
+        }
+
+        ludicrous_search_samples = 0;
+        ludicrous_search_idle_sum = 0.0f;
+        ludicrous_search_slipped = false;
+        ludicrous_search_cycle_sum = 0;
+
+        if (ludicrous_search_low <= ludicrous_search_high) {
+            uint32_t next =
+                (ludicrous_search_low + ludicrous_search_high) / 2;
+            clock->set_cpu_per_14m(next);
+        } else if (!ludicrous_searching_plateau) {
+            // Benchmark delivered CPU cycles at the fastest sustainable N,
+            // then search downward for the true throughput plateau.
+            ludicrous_searching_plateau = true;
+            ludicrous_plateau_target_cycles = 0;
+            clock->set_cpu_per_14m(ludicrous_search_best);
+        } else {
+            clock->set_cpu_per_14m(ludicrous_search_best);
+            ludicrous_cal_state = LS_CAL_DROPPING;
+            ludicrous_slip_streak = 0;
+            ludicrous_stable_frames = 0;
+            fprintf(stdout,
+                "Ludicrous plateau selected N=%u (nominal %.1f MHz)\n",
+                ludicrous_search_best,
+                ludicrous_search_best * 14.31818);
+        }
+        return;
+    }
+#else
+    if (ludicrous_cal_state == LS_CAL_PROBE) {
+        // Original one-frame guess probe is handled in run_one_frame.
+        return;
+    }
+#endif
+
+    // LS_CAL_DROPPING
+    if (modal_tracking) {
+        return;
+    }
+
+    if (frame_slipped) {
+        ludicrous_slip_streak++;
+        ludicrous_stable_frames = 0;
+        if (ludicrous_slip_streak >= 3) {
+            uint32_t n = clock->get_cpu_per_14m();
+            if (n > LUDICROUS_CPU_PER_14M_MIN) {
+                clock->set_cpu_per_14m(n - 1);
+                ludicrous_slip_streak = 0;
+            } else {
+                // Floor: lock even with tiny idle — host cannot do more.
+                ludicrous_cal_state = LS_CAL_LOCKED;
+                ludicrous_slip_streak = 0;
+            }
+        }
+        return;
+    }
+
+    ludicrous_slip_streak = 0;
+    ludicrous_stable_frames++;
+    if (ludicrous_stable_frames >= 30 && idle_percent >= 15.0f) {
+        ludicrous_cal_state = LS_CAL_LOCKED;
+    } else if (ludicrous_stable_frames >= 30 && clock->get_cpu_per_14m() <= LUDICROUS_CPU_PER_14M_MIN) {
+        ludicrous_cal_state = LS_CAL_LOCKED;
+    }
+}
+
+void computer_t::send_full_screen_message() {
+    event_queue->addEvent(new Event(EVENT_SHOW_MESSAGE, 0, "Entering Full Screen Mode. Press F3 to exit."));
+}
+
+/**
+ * call at end of every frame to update status and statistics.
+ */
+void computer_t::frame_status_update() {
+    if (last_frame_end_time == 0) {
+        last_frame_end_time = SDL_GetTicksNS()-1;
+        last_5sec_update = last_frame_end_time;
+    }
+    frame_count++;
+    if (frame_count % 60 == 0) {
+        uint64_t this_frame_end_time = SDL_GetTicksNS();
+        uint64_t frame_counter_delta = this_frame_end_time - last_frame_end_time;
+
+        fps = ((float)frame_count * 1000000000) / frame_counter_delta;
+        last_frame_end_time = this_frame_end_time;
+        frame_count = 0;
+
+        // TODO: maybe should update this every second instead of every 5 seconds.
+        uint64_t delta = clock->get_cycles() - last_5sec_cycles;
+        e_mhz = 1000 * (double)delta / ((double)(this_frame_end_time - last_5sec_update));
+
+        status_count++;
+        if (status_count == 2) {
+            last_5sec_cycles = clock->get_cycles();
+            last_5sec_update = this_frame_end_time;
+    
+            fprintf(stdout, "%llu delta %llu cycles clock-mode: %d CPS: %12.8f MHz [ slips: %llu]\n", 
+                u64_t(delta), u64_t(clock->get_cycles()), clock->get_clock_mode(), e_mhz, u64_t(clock_slip));
+            uint64_t et = event_times.getAverage();
+            uint64_t at = audio_times.getAverage();
+            uint64_t dt = display_times.getAverage();
+            uint64_t aet = app_event_times.getAverage();
+            uint64_t total = et + at + dt + aet;
+            fprintf(stdout, "event_time: %10llu, audio_time: %10llu, display_time: %10llu, app_event_time: %10llu, total: %10llu\n", 
+                u64_t(et), u64_t(at), u64_t(dt), u64_t(aet), u64_t(total));
+            fprintf(stdout, "PC: %04X, A: %02X, X: %02X, Y: %02X, P: %02X\n", 
+                cpu->pc, cpu->a, cpu->x, cpu->y, cpu->p);        
+            status_count = 0;
+        }
+    }
+}
+
+bool computer_t::has_bazfast() {
+    SystemConfig_t *config = get_system();
+    if (!config) return false;
+    for (int slot = 0; slot < NUM_SLOTS; ++slot) {
+        if (config->slot_devices[slot] == DEVICE_ID_PD_BLOCK3) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool computer_t::has_second_sight() {
+    SystemConfig_t *config = get_system();
+    if (!config) return false;
+    for (int slot = 0; slot < NUM_SLOTS; ++slot) {
+        if (config->slot_devices[slot] == DEVICE_ID_SECOND_SIGHT) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool computer_t::is_drivers_mounted() {
+    if (!drivers_mount_key.has_value() || !mounts) {
+        return false;
+    }
+    if (!mounts->media_status(*drivers_mount_key).is_mounted) {
+        drivers_mount_key.reset();
+        return false;
+    }
+    return true;
+}
+
+void computer_t::toggle_mount_drivers() {
+    if (!mounts || !has_bazfast()) {
+        return;
+    }
+
+    if (is_drivers_mounted()) {
+        mounts->unmount_media(*drivers_mount_key, DISCARD);
+        drivers_mount_key.reset();
+        return;
+    }
+
+    SystemConfig_t *config = get_system();
+    if (!config) return;
+
+    int bazfast_slot = -1;
+    for (int slot = 0; slot < NUM_SLOTS; ++slot) {
+        if (config->slot_devices[slot] == DEVICE_ID_PD_BLOCK3) {
+            bazfast_slot = slot;
+            break;
+        }
+    }
+    if (bazfast_slot < 0) return;
+
+    // BazFast 3 exposes 6 UI drive icons (PDB3_MAX_DEVICES).
+    storage_key_t key;
+    key.slot = static_cast<uint16_t>(bazfast_slot);
+    key.partition = 0;
+    key.subunit = 0;
+    int empty_drive = -1;
+    for (uint16_t drive = 0; drive < 6; ++drive) {
+        key.drive = drive;
+        if (!mounts->media_status(key).is_mounted) {
+            empty_drive = static_cast<int>(drive);
+            break;
+        }
+    }
+    if (empty_drive < 0) {
+        std::cerr << "Mount Drivers: no empty BazFast 3 drive available\n";
+        return;
+    }
+
+    std::string path;
+    Paths::calc_base(path, "vdisk/drivers.hdv");
+
+    key.drive = static_cast<uint16_t>(empty_drive);
+    disk_mount_t dm{ key.slot, key.drive, path };
+    if (!mounts->mount_media(dm, true /* force write-protected */)) {
+        std::cerr << "Mount Drivers: failed to mount " << path << "\n";
+        return;
+    }
+    drivers_mount_key = key;
+}

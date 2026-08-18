@@ -1,0 +1,144 @@
+*
+* Thunderclock Plus read time test for GSSquared
+* Original source code from ThunderClock Plus manual below.
+* The makefile is setup to assemble this using Merlin32.
+*
+
+*********************************************************
+* RDTIME SUBROUTINE: READ THE TIME FROM THE
+* THUNDERCLOCK WITHOUT USING THE ON-CARD
+* FIRMWARE. THE A-REGISTER SHOULD CONTAIN
+* THE SLOT # OF THE THUNDERCLOCK WHEN YOU
+* CALL RDTIME, AND UPON RETURN, THE TIME
+* WILL BE STORED IN THE LOCATIONS SHOWN BELOW.
+* THIS EXAMPLE HAS BEEN ASSEMBLED AT $7000,
+* BUT YOU COULD ASSEMBLE A COPY TO BE RETURN
+* WHEREVER YOU CHOOSE.
+*********************************************************
+
+*
+* UPD199OC REGISTER BIT DEFS
+*
+
+CREG 	EQU $c080		; command reg addr
+CLK     EQU $2			; clock on bit 1
+STB     EQU $4			; strobe on bit 2
+REGHLD 	EQU $0			; register hold
+REGSHF 	EQU $8			; register shift
+TIMRD   EQU $18			; time read
+
+
+	org	$7000
+
+	LDA #1
+	JSR RDTIME
+	RTS
+
+
+* Enter with Slot # of Thunderclock in A register
+
+RDTIME	ASL
+	ASL
+	ASL
+	ASL
+	TAY
+	LDA #TIMRD		; strobe counters to shift register
+	JSR SETCTL
+
+	LDA #REGSHF
+	JSR SETCTL		; set shift mode
+
+	LDX #10			; going to get 10 nibbles
+GTNBL   JSR SHIFT		; get nibble
+	STA TIME-1,X		; store time nibble
+	DEX
+	BNE GTNBL		; branch if more
+	RTS 
+
+******************************************
+* SETCTL-STROBE command in A-reg
+* into the UPD1990. Hold Strobe high 
+* for 40Us minimum.
+
+SETCTL	STA CREG,Y		; setup CTL bits
+	ORA #STB		; "or" in strobe
+	STA CREG,Y		; raise strobe
+	JSR STBDLY		; delay > 40us
+	EOR #STB		; clr strobe bit
+	STA CREG,Y		; drop strobe
+
+STBDLY	JSR STBDL1
+STBDL1	PHA
+	PHA
+	PLA
+	PLA			; KILL SOME TIME
+	RTS
+
+*******************************************
+* SHIFT - SHIFT DATA IN & OUT
+* ENTER WITH DATA TO BE SHIFTED IN
+* IN LOW 4 BITS OF A-REG.
+* DATA SHIFTED OUT RETURNED.
+* IN LOW 4 BITS OF A-REG.
+
+* THIS ROUTINE WORKS TO READ AND WRITE,
+* DEPENDING ON HOW COMMAND REGISTER WAS
+* SET PRIOR TO CALLING SHIFT.
+
+SHIFT	PHA			; save DATA-IN NIBBLE
+	LDA #4
+	STA TEMP1		; 4 BITS/NIBBLE
+	LDA #0
+	STA TEMP2		; CLR DATA-OUT BYTE
+
+SHLOOP	LDA CREG,Y		; GET DATA-OUT BIT
+	ASL			; DATA-OUT BIT TO CARRY
+	ROR TEMP2		; COMBINE
+	PLA			
+	PHA			; GET & RESAVE DATA-IN
+	AND #1			; BIT 0 ONLY
+	STA CREG,Y		; OUTPUT DATA
+	ORA #CLK
+	STA CREG,Y		; RAISE CLOCK
+	EOR #CLK
+	STA CREG,Y		; DROP CLOCK
+	PLA
+	ROR			; SHIFT DATA-IN NEXT BIT
+	PHA			; SAVE
+	DEC TEMP1		; DONE 4 BITS?
+	BNE SHLOOP		; BRANCH IF NOT
+
+	PLA			; ADJUST STACK
+	LDA TEMP2		; GET DATA-OUT NIBBLE
+	CLC
+ROR4	ROR
+	ROR
+	ROR
+	ROR 			; RIGHT JUSTIFY IN THE BYTE
+	RTS
+
+TEMP1   DW 0
+TEMP2   DW 0
+
+****************************************
+* UPON RETURN FROM THE SUBROUTINE
+* CALL TO RDTIME, THE TIME WILL BE STORED IN THE
+* LOCATIONS BELOW.
+****************************************
+
+TIME    
+*
+MONTH	DW 0			; MONTH (1-12 BINARY)
+DOW     DW 0			; DAY-OF-WEEK (0-6 BCD, 0=SUNDAY)
+*
+DATEMS  DW 0			; DATE TENS (0-3 BCD)
+DATELS  DW 0			; DATE UNITS (0-9 BCD)
+*
+HRMS    DW 0			; HOUR TENS (0-2 BCD)
+HRLS    DW 0			; HOUR UNITS (0-9 BCD)
+*
+MINMS   DW 0			; MINUTE TENS (0-5 BCD)
+MINLS   DW 0			; MINUTE UNITS (0-9 BCD)
+*
+SECMS   DW 0			; SECOND TENS (0-5 BCD)
+SECLS   DW 0			; SECOND UNITS (0-9 BCD)

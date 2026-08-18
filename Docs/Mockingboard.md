@@ -1,0 +1,531 @@
+# Mockingboard
+
+Mockingboard is a sound card developed for Apple II computers, and was the best sound generation available on Apple IIs until the release of the Apple IIgs which had waveform synthesizer onboard.
+
+The Mockingboard is built around the AY-3-8910 chip, a sound generation chip.
+
+Well, google says the C had one preinstalled speech chip. Which I don't have. And that A had no chip.
+So let's try A. Uh, nope.
+Says the Sound I and II had the 8910 chip, whereas A and C had the 8913 chip.
+This could be an issue.. 
+
+Wikipedia says:
+The AY-3-8910 is a simple finite-state machine.
+
+BTW the Yamaha 2149 is a much better data sheet. 
+
+Its state of sixteen 8-bit registers ..
+
+```
+Six registers control the pitches produced in the three primary channels. The frequency to generate is held in two 8-bit registers dedicated to each channel, but the value is limited to 12-bits for other reasons, for a total of 4095 (the register value is used as the frequency divider and 0 is treated as 1) different pitches. Another register controls the period of a pseudo-random noise generator (a total of 31 different cycle times), while another controls the mixing of this noise into the three primary channels.
+```
+
+* (6) frequency registers (two 8-bit, limited to 12 bits total). Register value is a frequency divider. (What is the frequency?)
+* (3) channel volume (3 more registers, one per channel)
+* (1) Pseudo-random noise generator timing (31 cycle times)
+* (1) mixing or pseudo-random noise into main channels
+* (2??) optional envelope controls
+* (3) three registers control times of the envelope controller: envelope type and cycle time.
+
+Envelope types: sawtooth; triangle; starting on min or max. Only one envelope shared among all three channels.
+
+16 total registers.
+
+While the GI data sheet calls the registers R0-R7, and R10-R17, there are only 16 (not 18) and they are referenced using numbers 0-8. 
+OH. It's **octal**. Man that is pretty dumb.
+
+Some clone cards had multiple of these chips, one had four chips for 12 voices. Most software only supported 2 chips / 6 voices.
+
+Here's if you want to build your own Mockingboard:
+
+https://wiki.reactivemicro.com/images/2/24/Mockingboard_Assembly_Guide_2019.pdf
+
+All registers can be read/written. CPU can read "present state", or "programmed values". 
+
+The "analog sound outputs can each provide 4 bits of logarithmic digital to analog conversion". <- what's this?
+
+However, the aforementioned Mockingboard demo disk (available freely on ReactiveMicro’s Wiki) actually contains this for you. Demo disk available here:
+
+https://wiki.reactivemicro.com/Mockingboard
+
+to wit two Demo disks. This will be good for testing.
+
+http://www.downloads.reactivemicro.com/Apple%20II%20Items/Hardware/Mockingboard_A/Software/mockingboard1.dsk
+
+http://www.downloads.reactivemicro.com/Apple%20II%20Items/Hardware/Mockingboard_A/Software/mockingboard2.dsk
+
+This is a MB-Audit (tester) program:
+https://github.com/tomcw/mb-audit
+
+exercises a Mockingboard and tests it.
+
+This will be a fairly involved emulation (maybe), but it will be an extremely satisfying one.
+
+ok so let's think about this stuff and define terms.
+
+First off:
+
+*tone period* - this is controlling the frequency. 
+
+*Envelope* - In sound and music, an envelope describes how a sound changes over time. For example, a piano key, when struck and held, creates a near-immediate initial sound which gradually decreases in volume to zero. An envelope may relate to elements such as amplitude, frequency or pitch. So this is basically the shape of the waveform. Is this what is meant? Above, it says "envelope types include: sawtooth; triangle". 
+
+Here's the data sheet for the AY:
+https://map.grauw.nl/resources/sound/generalinstrument_ay-3-8910.pdf
+
+Tone Generators: "produce the basic square wave tone frequencies for each channel (A, B, C)
+Mixers: combine the outputs of the tone generators and the noise generator. one for each channel (a,b,c)
+amplitude control: provides the D/A converters with either a fixed or variable amplitude pattern. Fixed amplitude is under CPU control; variable amplitude is accomplished by using the Envelope Generator.
+Envelope Generator: produces an envelope pattern which can be used to amplitude modulate the output of each Mixer.
+
+### Tone Generator Control - Registers R0, R1, R2, R3, R4, R5
+
+| Operation | Registers | Function |
+|-|-|-|
+| Tone Generator Control | R0 - R5 | Program tone periods |
+| Noise Generator Control | R6 | Program noise period |
+| Mixer Control | R7 | Enable tone and/or noise on selected channels |
+| Amplitude Control | R10 - R12 | select "fixed" or "envelope variable" amplitudes |
+| Envelope Generator Control | R13 - R15 | Program Envelope period and select envelope pattern|
+
+| Coarse Tune Register | Channel | Fine Tune Register |
+|-|-|-|
+| R1 | A | R0 |
+| R3 | B | R2 |
+| R5 | C | R4 |
+
+The 4 MSB of the Coarse register is not used; Coarse B3-B0 + Fine B7-R0 are the 12-bit value up to 4095.
+
+"The frequency of each square wave generated by the three Tone Generators" is obtained by counting down the input clock by 16, then by further counting down the result by the programmed 12-bit tone period value. (What's the input clock on a Mockingboard? Reactive Micro parts list to the rescue.. 
+
+Is it the Apple II clock? Divide by 16. then divide by the counter. that would be 65KHz. 
+
+### Noise Generator Control - Register R6
+
+Bits B7 - B5 unused. Bits B4 - B0 (5 bits).
+Frequency of the noise source is obtained by first counting down the input clock by 16, then by further counting down the result by the 5 bit noise period value.
+
+### Mixer Control - I/O Enable
+
+There are two "general purpose I/O ports" which I think are likely unused on a Mockingboard.
+
+Bits B5 - B3 are NOT Noise Enable C B A; B2 - B0 are NOT Tone Enable C B A. So you can mix tone and noise on the same channel.
+
+Instead of mixing, instead have a AudioStream for each one of these. (i.e., treat as six channels instead of 3).
+
+### Amplitude Control - R10, R11, R12
+
+R10 - A
+R11 - B
+R12 - C
+
+B4 is amplitude mode. B3 - B0 is 4-bit fixed amplitude level.
+
+### Envelope Generator Control - R13, R14, R15
+
+R13 and R14 vary the frequency of the envelope. relative shape and cycle pattern is controlled by R15.
+
+#### Envelope Period Control - R13, R14
+
+Frequency of the envelope is obtained by first counting down the input clock by 256, then further counting down the result by the programmed 16-bit envelope period value. R14 is Coarse (Hi) and R13 is Fine (lo).
+
+Envelope Shape - R15
+
+The envelope generator further counts down the envelope frequency by 16, producing a 16-state-per-cycle envelope pattern as defined by its 4 bit counter E3, E2, E1, E0. The shape/cycle control is bits B3 - B0 of R15.
+B0 - Hold
+B1 - Alternate
+B2 - Attack
+B3 - Continue
+
+These together create particular waveforms. 
+
+### Output
+
+All of these together create a 4-bit output level; which is logarithmic. i.e., 12 is significantly higher than 11. 
+
+Each envelope is a repeating cycle; for instance, the triangle wave is 16 steps down from 15 to 0, followed by 16 steps up to 0 to 15, repeating. (B1 'alternate' bit is set).
+
+It's all based on 16 samples, either repeating, or non-repeating.
+
+The length of the 16 samples is the EP, Envelope Period.
+
+In any given envelope period, the amplitude:
+* changes by 1 step - levels 0 to 15 or levels 15 to 0.
+* stays at level 15 or at level 0
+
+Attack = 0 means go from 15 to 0; 1 means go from 0 to 15;
+Hold means, whatever the level was at the end of the last EP, keep it at that level.
+continue means repeat the previous EP form.
+Alternate means repeat the previous EP form in reverse.
+
+in effect, the envelope generator output E3-E0 is a 4-bit counter, which has three states:
+step; (attack=1, step up)
+step-reverse; (attack=0, step down)
+hold.
+
+So with these 4 bits of inputs I should be able to emulate all these waveforms. Ought to be easy..
+
+Handling stuff that manually controls the amplitude is going to require some effort a'la the current speaker.cpp device.
+
+Due to the logarithmic DAC, a triangle wave doesn't sound so harsh. It's a mix of a sine wave and a triangle wave.
+
+In a modern system, we directly control the amplitude on every sample, which is how we generate frequencies.
+
+(Contemplate this logarithmic thing in speaker.cpp?)
+
+All of this supposedly can be generated by state machines. So, definitely gotta know the input frequency. Maybe it's the Apple II 1.0205?
+
+So Step 1 is to create a state machine that based on B3-B0 can create the 16-sample envelope sections.
+
+Or instead of that, how about we just define lookup tables with those. A 2nd lookup table for the logarithmic gizmo.
+
+From AppleWin:
+
+```
+	/* AY output doesn't match the claimed levels; these levels are based
+	* on the measurements posted to comp.sys.sinclair in Dec 2001 by
+	* Matthew Westcott, adjusted as I described in a followup to his post,
+	* then scaled to 0..0xffff.
+	*/
+	static const int levels[16] = {
+		0x0000, 0x0385, 0x053D, 0x0770,
+		0x0AD7, 0x0FD5, 0x15B0, 0x230C,
+		0x2B4C, 0x43C1, 0x5A4B, 0x732F,
+		0x9204, 0xAFF1, 0xD921, 0xFFFF
+	};
+```
+
+So, once you have all this, the maximum number of EPs per second if we do one sample per 44.1KHz is 2,756. But does this combine with the square wave generator in some way?
+
+yeah. so the frequency is not strictly controlled by the 16 sample EP. 
+
+There's a registers / frequency table in the manual. Example: B8, 7902hz. is coarse=0,fine=8. if 8 is number of ticks delay between cycle change, then 8 * 7902 = 63216.
+
+We cannot represent a 64KHz frequency with 44.1KHz sample rate. We -can- with a sample rate of 120,000. Is that possible? what if we do 120K samples of 8 bit unsigned. That would be 120KB/sec, an eminently reasonable speed. And then we're dumping data into there pretty much raw as-is, without having to sample shift it ourselves. We're letting SDL do the mixing and downsampling as needed to hardware. I guess we could test that?
+
+and if this worked, could I do the same for the speaker-click emulator?
+
+NO, we don't need to do any of that. The Envelope as a waveform is multiplied by the base square wave. They are completely independent counters/frequencies.
+
+The "tone" is a square-wave output. The "envelope" controls the amplitude. When you multiply them together (where tone is from 0.0 to 1.0, and envelope is also from 0.0 to 1.0), then you can get a variety of interesting effects.
+
+The "noise generator" will be pre-calculated noise in a LUT. And the envelope can be a LUT also, where we lookup values for TWO cycles and then repeat or not the 2nd of those cycles.
+
+What we do need is a reliable way to generate a square wave at an arbitrary frequency into a 44100Hz sample stream. the highest possible frequency of the chip is crazy, 64KHz. But nobody can hear that. We don't need to represent that. (or do we?).
+
+
+## R6522 - VIA
+
+This is an I/O controller. Often paired with 6502s and prominent on many apple II cards. This is the interface between the Apple II bus, and AY-3-8910 chip(s).
+
+So the MockingBoardManual.rtf shows routines for programming the MB. First are routines:
+INIT, LATCH, WRITE, RESET that send commands to a 6522. Then there is START, which actually sends commands to the AY.
+
+Basically: 
+```
+   LDY #$REGISTER
+   STY ORA              ($C401)
+   JSR LATCH            ('latch' in the register number)
+   LDA #$DATA
+   STA ORA
+   JSR WRITE            write the data to the AY
+
+LATCH:
+    LDA #$07
+    STA ORB
+    LDA #$04
+    STA ORB
+
+WRITE:
+    LDA #$06
+    STA ORB
+    LDA #$04
+    STA ORB
+
+; these set the 6522 port directions
+INIT:
+    LDA #$FF            set port a for output
+    STA DDRA            set data direction
+    LDA #$07            set port b for output
+    STA DDRB            
+```
+
+AppleWin implements the whole 6522 and then separately 'attaches' it to the AY in its code. I will implement a simpler approach since we only need to support normal use cases. But at a minimum, we should emulate the DDR (direction registers) as they might also mask data being read/written.* (I never did this, now biting me)
+
+In the case above, DDRB is set to 7 because port B is the 'Command' port, and commands are only 0-7. These may be wired directly to the AY somehow.. yes, PB2-PB0 are wired:
+
+* PB2 - /RESET
+* PB1 - BDIR - direction of data
+* PB0 - BC1
+
+BC2 is not present on AY-8913.
+
+Thus, the RESET routine is: clear that bit (/RESET means do a reset) then turn reset off (/RESET = 1 is disabled).
+
+to send a command, you LATCH the command then WRITE the data, i.e.
+```
+cmd -> ORA
+7, then 4 -> ORB
+data -> ORA
+6, then 4 -> ORB
+```
+ORA is the data; ORB is the PB2/1/0 commands.
+
+or you LATCH command (5?) then READ the data, i.e.
+cmd -> ORA
+7, then 4 -> ORB
+5, then 4 <- IRB
+
+That's pretty straightforward, if poorly documented.
+
+6522 data sheet:
+https://www.princeton.edu/~mae412/HANDOUTS/Datasheets/6522.pdf
+
+lots more information on the timer counters and interrupt scheme.
+
+### Commands
+
+* 00 - 000 - RESET
+* 01 - 001 - RESET
+* 02 - 010 - RESET
+* 03 - 011 - RESET
+* 04 - 100 - end strobe (inactive)
+* 05 - 101 - read  from PSG (pb1 = 0)
+* 06 - 110 - write to PSG (pb1 = 1)
+* 07 - 111 - bus contains register address which should be latched.
+
+## Interrupts
+
+There is some use of interrupts. However, in the example code, it appears to be only for Speech. It uses the 6522 interrupt handling stuff. Interrupt flag is $C40D, Interrupt Enable is $C40C.
+
+In the speech driver, it is using interrupts to feed data from a "data file" as needed. (Because each phoneme takes a certain amount of time to output?)
+
+I would not assume that nothing else uses the interrupt logic however.
+
+This brings up the general lack of IRQ support in the EMU right now. for IRQ support, I guess we would have an IRQ_asserted flag for each slot, in the cpu struct. Then we can just check if that is non-zero to determine IRQ assert input into the CPU loop.
+
+## SSI 263A Phoneme Speech Synthesizer
+
+Some Mockingboards also had a speech synthesis chip. (See the doc above).
+
+## ROM
+
+Mockingboard.D ROM is at:
+
+https://github.com/AppleWin/AppleWin/blob/master/resource/Mockingboard-D.rom
+
+But whoops, that's the Apple IIc standalone thing.
+
+## Compatibility
+
+see spreadsheet
+
+Ultima IV - I am getting fairly far into it; mockingboard music works in the intro (interrupt driven); but at various points in the game I get hung up at PC 0x0348. Why? Don't Know. Need a debugger! the code seems to be:
+
+0348: LDA $82
+034A: BNE $0348
+
+that is clearly something pending interrupts. Well, of course I haven't finished all the code yet. Maybe they use timer 2? run with full MB debug.
+
+Bank Street Music Writer - it pings early on:
+mb_read_Cx00: 04
+mb_read_Cx00: 04
+
+That's the T1 low-order counter. In almost all cards, this will be ROM and the value won't change. I bet they're checking to see if it changes.
+
+### mb-audit
+
+I am finally getting around to running the mb-audit tool against GS2. The first issue is that it starts up and immediately goes into a mode where the interrupt service routine executes and then instantly runs again - i.e., the IRQ flag is never clearing.
+
+[x] ok, I need a debug feature that will show the MB registers without executing the logic.   
+
+
+bp 325e.32e6; c404.c405; c484.c485
+
+Timer 1 One-Shot Mode
+
+"Timer 1 one-shot mode generates a single interrupt for each timer load operation".
+
+Writing into T1L-H has no effect on timer operation (we know)
+when counter reaches zero,
+  interrupt flag is set
+  counter will continue to decrement at system clock rate.
+  
+  interrupt can't be set again unless it has been cleared
+  requires a write T1C-H to reenable another interrupt.
+
+Timer 2 Free-Run Mode
+
+each time counter reaches zero,
+  interrupt flag is set
+  latch -> counter
+  continue to decrement counter.
+
+  NOT necessary to rewrite timer value to enable interrupt when we reach 0 again.
+
+so the mb_t1_timer_callback is NOT correct currently. We need a flag "interrupt on next timer timeout".
+
+CRAZY CYCLES runs with interrupts disabled, because of course they can't tolerate an IRQ in the middle of their graphics routines. So they must not use the 6522 via timers.
+[ ] TLB1.dsk isn't working  
+
+DD (Digidream) drops audio frames like crazy in debug build and if debugger window is open. 
+
+mb-audit now failing with mockingboard failed test 50:06:00
+50: is 6522-A
+06: is test, 00 subtest
+
+ok issue is with when we set T1C-H, we also set the latch.
+In one-shot mode, after 0, the counter will decrement to FFFF. In continuous, it will reset to the latch value.
+When we read the value at any other time, we calculate what the value is supposed to be, but assume always in continuous mode.
+
+t1_triggered_cycles is currently when the counter was written. Let's change to:
+
+when the counter will count down to 0. Which we set whenever we write T1C-H.
+And then:
+   if one-shot mode,
+       counter is trigger_cycles - cycles & 0xFFFF.
+   if continuous mode,
+       if cycles < trigger_cycles, counter is trigger_cycles - cycles & 0xFFFF.
+       if cycles >= trigger_cycles, counter is (trigger_cycles - cycles) % latchval like it is now.
+
+ok, next problem: we might be interrupting too quickl.y
+
+```
+   135                          										;   T1C
+   136                          										; $0006
+   137  2bd8 a902               	lda		#2					; 2cy	; $0004
+   138  2bda a201               	ldx		#1					; 2cy	; $0002
+   139  2bdc 58                 	cli							; 2cy	; $0000
+   140  2bdd 85fc               	sta		zpTmp2				; 3cy	; $ffff
+   141                          										; $0002	: real 6522 - IRQ occurs on 2nd cycle... so IRQ occurs after this 'sta zp'
+   142                          										; $0001	: FPGA 6522 - IRQ occurs on 3rd cycle... so IRQ deferred until after next 'stx zp'
+   143  2bdf 86fc               	stx		zpTmp2
+```
+
+They set T1C to 6 and then the values are supposed to be as above.. yes, we're interrupting 1 cycle too soon. 
+There was something about the counter needing to be one off. I can just add 1 to triggered_cycles when I set it initially.
+
+OK, that is now working correctly I think. I had to add an extra 2 cycles to delay triggering of the thing. I wonder if this is due to precisely when the 6502 is writing, and if I might be a cycle early? It's (FE),Y so I could be off (one of those phantom cycle things?)
+
+now I have failures: slot 4 warning unknown card (no AYs) ?
+
+So, this code:
+```
+    99  4208 a000               		ldy		#AY_AFINE
+   100  420a 20d550             		jsr		AY_Echo_ReadRegValueEx
+   101  420d c9aa               		cmp		#$AA
+   102  420f d01a               		bne		+
+```
+
+is failing (where it tries to read back the #$AA it wrote).
+DDRA is 0. ORA is 0. So am I not reading values back correctly?
+yah. So it sets the register it wants to read (in this case 00). And it sets DDR to 0 (all input).
+When it reads, it should be reading from the chip register. Instead it is just returning ora.
+I need to separate IRA (input register) and ORA (output register). When we strobe something with 5 (versus 6 or 4) we need to read the chip register and put in IRA/B. And then mask and return appropriately based on the DDRA/B value.
+
+ok the next test is at $3010. It turns off interrupts; sets T1 for one-shot with value $0101, then waits for it to go below 0; then clears IFR.
+After it goes below 0, it then enables T1/T2 IRQ and waits for T1C to underrun -again-.
+Because we had done a 1-shot, and we have not reprogrammed T1C, it should not interrupt again, even though we enabled interrupts.
+in case MB_6522_IER we schedule an interrupt. But should only schedule an interrupt **if we're in continuous mode**.
+
+ok, I added state flags to T1 and T2. When we write the counter, the flag is set to indicate the one shot has not yet shot.
+In the interrupt handlers (because a timer is set whether IRQ are enabled or not, after writing a counter) if it's one-shot mode, AND the flag is set, we set IRQ.
+Otherwise the flag was off, and we do not re-irq.
+
+now we've cleared that, and have an error 11:03:00. Expected F1, Actual F2.
+
+starts at $31F8: there was $FFFF in the latch, then we write 0 to L1H and reset counter to 00FF. When we readit back with lda c400,y we get F2, they are expecting F1. If I adjust the counter offset of +2 to +1, the previous tests where we check when the IRQ happens fail. ($50 and $60 which as 6522-A and 6522-B?). 
+
+ok, looking back at $2BD6, where it checks T1C IRQ timing on a 6-count countdown.
+Right after we: sta ($fe),y we are showing T1L of $0006, and T1C of $0007. That's obvious B.S. audit says it should be 6 and that makes sense to me.
+But also of note, the 6522 doc says the IRQ should be triggered when the counter reaches $0. 
+
+sta ($FE),y -> 0006
+lda #2 - 2 cycles, should be 4 after.
+ldx #1 - 2 cycles, 0002 after
+cli - 2 cycles, 0000 
+sta zpTmp2 ; 3cy; $ffff <- ?? what 
+```
+   140  2bdd 85fc               	sta		zpTmp2				; 3cy	; $ffff
+   141                          										; $0002	: real 6522 - IRQ occurs on 2nd cycle... so IRQ occurs after this 'sta zp'
+   142                          										; $0001	: FPGA 6522 - IRQ occurs on 3rd cycle... so IRQ deferred until after next 'stx zp'
+```
+so we hit 0 on the last cycle of the cli. we need the interrupt to trigger not then, but after. This is why I added +2 to the trigger.
+
+I do one step on STA $FC, and it sets PC to irq handler. 
+1) when should IRQ be checked?
+2) how soon after a cli will 6502 allow interrupt to occur?
+
+In debugger I should create a trace entry for an IRQ, so we have a record of it and it's a lot more clear what happened.
+
+"On the 6502 CPU, an interrupt will not stop an instruction mid-execution. The 6502 completes the current instruction before servicing an interrupt. This is a common design principle in many processors to maintain data integrity and avoid complex state management during partial instruction execution.
+Regarding the timing of interrupts after a CLI (Clear Interrupt Disable Flag) instruction:
+The effect of CLI is delayed by one instruction. This means that the interrupt disable flag (I flag) in the status register is cleared during the execution of the CLI instruction, but the CPU's ability to respond to IRQ interrupts is not enabled until the next instruction has begun.
+Therefore, an IRQ interrupt will not occur immediately after a CLI instruction. If an IRQ becomes pending during or immediately after the CLI, it will be recognized and serviced only after the instruction following the CLI has completed its execution. NMI (Non-Maskable Interrupts) are not affected by the I flag and can be serviced regardless of its state, but they still wait for the current instruction to complete."
+
+ok. So this is actually why the 2bdd code was failing. I did the wrong fix.
+So:
+if C was 1,
+and we CLI,
+skip next interrupt check.
+
+ok. I pulled the +2 back to +1, and, implemented the "skip irq next instruction" logic. The IRQ is triggering after STA zpTmp2.
+
+So now I have mb test 6522-A 50:07:01 failed. expected 40, got 00.
+and also 6522-B failed with 60:03:01, expected 40: actual 00
+
+
+## Comparing to Mariani / (AppleWin)
+
+on a reset, T1L is FFFF, not 0.
+
+[x] read of IER should always have bit 7 set to 1. I do this in code, but the debug output wasn't setting it. I set that now.
+
+
+
+## Mockingboard Sound-Speech Generator Disk
+
+boot, do music player, this is the ASDF to play notes program.
+
+the keyboard music player isn't working, because IFR bit is never being set. ACR is 0, IER is 0. But I wonder if IFR is supposed to come on anyway?
+PCR is B0 and it's checking BIT $10 here? 
+
+PCR B0 means: CB2 is Pulse Output, CB1 interrupt control is positive active edge.
+And BIT $10 is checking for CB1 active edge. 
+
+[ ] Implement whatever the heck CB2 / CB1 are.
+
+[ ] manually test Mariani to see if IFR T1 is set at 0 even if IER T1 is not set. NO, IFR T1 is never set if IER is off. (guessing).  
+
+ok, the AY code queues register changes, it does not set them immediately, because we generate audio based on time stamps of register changes. However, code in the 6502 needs to be able to read the instantaneous value of a register. So we need a raw_registers[0x18] which is basically a copy of the registers.
+
+ok!! Making some progress now. MB-Audit detects the card as a 'C', which I guess is Mockingboard C? Unsure. But it's better than a ? and no longer says "no AYs detected".
+Still failing 6522 Test: 11:00:00
+
+Run against some software to test. The suite should be:
+Ultima IV; Ultima V; Skyfox; mockingboard1.dsk; Nox Archaist Demo
+
+nox archaist volume is set to 7, a little on the low side esp once everything is mixed.
+
+## The Ultima V Conundrum!
+
+I've never gotten this to work, but I've always been testing Mockingboard C. A didn't work either.
+
+with sound ii the IRQ never turns off. I bet it's just slamming in the IRQ handler. 
+Yep. I just did the RTI. and immediately back to the interrupt handler. ok, so at least I know a little more what's going on..
+is it the voice stuff?
+
+The interrupt handler does this:
+check to see if this is the timer1 interrupt
+if so, write new value to T1L_L and T1L_H. The latch.
+Since it's immediately falling back into interrupt routine, it's expecting this write to the latch to clear the timer1 interrupt.
+But the 6522 data sheet says the timer1 interrupt flag is reset by writing to T1CH (which I do). Says nothing about T1LH.
+However, AppleWin clears the timer1 flag when the T1L_H is written to.
+So, both the UltimaV code and AppleWin strongly suggest we need to clear timer1 int on T1L_H write.
+Sigh. FIXED.
+
+# Other implementations
+
+This is a cycle-by-cycle emulation for the 6522. Check it out to see if it can help understand some of the 6522 behavior I'm unsure about.
+
+https://github.com/floooh/chips/blob/master/chips/m6522.h
+

@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <link rel="icon" type="image/png" href="img/gssquared-mark.png">
+  <!-- Cross-Origin Isolation (COOP/COEP) for SharedArrayBuffer / pthreads on GitHub Pages -->
+  <script src="coi-serviceworker.js"></script>
+
+  <!-- PWA Manifest & Icons -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#090d16">
+
+  <!-- Google Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --panel-bg: rgba(18, 26, 42, 0.75);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --panel-blur: 16px;
+      --accent-blue: #3b82f6;
+      --accent-glow: rgba(59, 130, 246, 0.4);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --led-active: #22c55e;
+      --led-inactive: #475569;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.15), transparent 70%),
+        radial-gradient(circle at 10% 90%, rgba(139, 92, 246, 0.1), transparent 50%);
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+    }
+
+    /* Main Container Layout */
+    #app-container {
+      display: flex;
+      flex-direction: column;
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    /* Top Navigation Header Bar */
+    .app-header {
+      position: relative;
+      height: 48px;
+      background: var(--panel-bg);
+      backdrop-filter: blur(var(--panel-blur));
+      -webkit-backdrop-filter: blur(var(--panel-blur));
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      z-index: 20;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 1.1rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-logo {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+
+    .brand-logo img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .brand-title span {
+      background: linear-gradient(90deg, #60a5fa, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    /* Status LEDs */
+    .status-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .led-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .led-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--led-inactive);
+      transition: background-color 0.2s, box-shadow 0.2s;
+    }
+
+    .led-dot.active {
+      background-color: var(--led-active);
+      box-shadow: 0 0 8px var(--led-active);
+    }
+
+    /* Header Action Controls */
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-icon {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .btn-icon:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 10px var(--accent-glow);
+      transform: translateY(-1px);
+    }
+
+    .btn-icon:active {
+      transform: translateY(0);
+    }
+
+    /* Canvas Viewport */
+    #viewport {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #000;
+    }
+
+    canvas.emscripten {
+      border: 0 none;
+      padding: 0;
+      background: #000;
+      display: block;
+      aspect-ratio: 1288 / 928;
+      width: auto;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      outline: none;
+      box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+    }
+
+    /* Modern Overlay Screen */
+    #overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      /* Keep the SDL canvas out of sight until its first post-overlay resize
+         has settled; otherwise a transient logical-presentation frame leaks
+         through the blur while the WASM runtime is starting. */
+      background: var(--bg-dark);
+      z-index: 30;
+      cursor: default;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .overlay-card {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 36px 48px;
+      max-width: 480px;
+      width: 90%;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .overlay-badge {
+      width: 64px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+
+    .overlay-badge img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .overlay-title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+    }
+
+    .overlay-subtitle {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      margin: 0 0 24px 0;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255, 255, 255, 0.2);
+      border-top-color: var(--accent-blue);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 16px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Floating Status Toast */
+    #status-toast {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: var(--panel-bg);
+      backdrop-filter: blur(var(--panel-blur));
+      border: 1px solid var(--panel-border);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      z-index: 25;
+      pointer-events: none;
+      transition: opacity 0.3s;
+      max-width: 34vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Modal Styles */
+    .modal-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 20px;
+    }
+
+    .modal-backdrop.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: #0f172a;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 520px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+      animation: modalIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.95) translateY(10px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-header h3 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      transition: color 0.2s, background 0.2s;
+    }
+
+    .modal-close:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .modal-body {
+      padding: 20px;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+
+
+    /* Hotkey Table */
+    .keymap-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .keymap-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .key-badge {
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-size: 0.75rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: #fff;
+    }
+
+    /* Touch Controls Overlay for Mobile */
+    .touch-controls {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      display: none;
+      gap: 10px;
+      z-index: 25;
+    }
+
+    @media (max-width: 768px) {
+      .status-group { display: none; }
+      .touch-controls { display: flex; }
+      .brand-title { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app-container">
+    <!-- Header Bar -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-logo">
+          <img src="img/gssquared-mark.png" alt="GSSquared logo">
+        </div>
+        <div class="brand-title">GS<span>Squared</span> Web</div>
+      </div>
+
+      <div id="status-toast">Downloading emulator core...</div>
+
+      <div class="header-actions">
+        <button class="btn-icon" id="btn-hotkeys" title="Hotkey Reference">
+          <i class="fa-solid fa-keyboard"></i>
+          <span>Hotkeys</span>
+        </button>
+        <button class="btn-icon" id="btn-audio" title="Toggle Mute">
+          <i class="fa-solid fa-volume-high" id="audio-icon"></i>
+        </button>
+        <button class="btn-icon" id="btn-fullscreen" title="Fullscreen Mode">
+          <i class="fa-solid fa-expand"></i>
+        </button>
+        <a class="btn-icon" href="https://github.com/anomixer/gssquared" target="_blank" rel="noopener noreferrer" title="View GitHub Repository">
+          <i class="fa-brands fa-github" style="font-size: 1.1rem;"></i>
+        </a>
+      </div>
+    </header>
+
+    <!-- Canvas Viewport -->
+    <main id="viewport">
+      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+    </main>
+
+  </div>
+
+  <!-- Click to Start Overlay -->
+  <div id="overlay">
+    <div class="overlay-card">
+      <div class="overlay-badge">
+        <img src="img/gssquared-mark.png" alt="GSSquared logo">
+      </div>
+      <h1 class="overlay-title">GSSquared</h1>
+      <p class="overlay-subtitle">Apple II / IIgs WebAssembly Emulator</p>
+      
+      <div class="spinner" id="overlay-spinner"></div>
+      <div id="overlay-hint" style="color: var(--text-muted); font-size: 0.9rem;">Initializing WebAssembly runtime...</div>
+
+    </div>
+  </div>
+
+
+  <!-- Hotkeys Modal -->
+  <div class="modal-backdrop" id="modal-hotkeys">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-keyboard"></i> Apple II Hotkeys</h3>
+        <button class="modal-close" id="close-hotkeys">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="keymap-grid">
+          <div class="keymap-item">
+            <span>Capture Mouse</span>
+            <span class="key-badge">F1</span>
+          </div>
+          <div class="keymap-item">
+            <span>Monitor Toggle</span>
+            <span class="key-badge">F2</span>
+          </div>
+          <div class="keymap-item">
+            <span>Full Screen</span>
+            <span class="key-badge">F3</span>
+          </div>
+          <div class="keymap-item">
+            <span>Slot Manager</span>
+            <span class="key-badge">F4</span>
+          </div>
+          <div class="keymap-item">
+            <span>Joystick Mode</span>
+            <span class="key-badge">F6</span>
+          </div>
+          <div class="keymap-item">
+            <span>Speed Toggle</span>
+            <span class="key-badge">F9</span>
+          </div>
+          <div class="keymap-item">
+            <span>Control-Reset</span>
+            <span class="key-badge">Ctrl + F12</span>
+          </div>
+          <div class="keymap-item">
+            <span>Open Apple</span>
+            <span class="key-badge">Left Alt</span>
+          </div>
+          <div class="keymap-item">
+            <span>Closed Apple</span>
+            <span class="key-badge">Right Alt</span>
+          </div>
+          <div class="keymap-item">
+            <span>Reboot (IIe/IIgs)</span>
+            <span class="key-badge">Ctrl + F12 + Left Alt</span>
+          </div>
+        </div>
+        <button class="btn-primary" id="btn-enter-control-panel" type="button">
+          <i class="fa-solid fa-sliders"></i> (IIgs) Enter Control Panel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="text/javascript">
+    var statusToast    = document.getElementById('status-toast');
+    var overlayElement = document.getElementById('overlay');
+    var overlayHint    = document.getElementById('overlay-hint');
+    var overlaySpinner = document.getElementById('overlay-spinner');
+    var audioIcon      = document.getElementById('audio-icon');
+    var runtimeReady   = false;
+    var audioMuted     = false;
+
+    // Status messages from the C++ OSD are also shown in the centered header.
+    window.gssquaredSetStatus = function (text) {
+      if (statusToast) statusToast.textContent = text || 'Ready';
+    };
+
+    // Emscripten Module definition
+    var Module = {
+      canvas: (function () {
+        var canvas = document.getElementById('canvas');
+        canvas.addEventListener('webglcontextlost', function (e) {
+          alert('WebGL context lost. Please reload the page.');
+          e.preventDefault();
+        }, false);
+        return canvas;
+      })(),
+      preRun: [function () {
+        // Idempotent mkdir/rmdir for /tmp/filedrop safety under SDL Emscripten
+        var origMkdir = FS.mkdir.bind(FS);
+        FS.mkdir = function (path, mode) {
+          try { return origMkdir(path, mode); }
+          catch (e) { if (e && e.errno === 20) return undefined; throw e; }
+        };
+        var origRmdir = FS.rmdir.bind(FS);
+        FS.rmdir = function (path) {
+          try { return origRmdir(path); }
+          catch (e) { if (e && e.errno === 44) return undefined; throw e; }
+        };
+
+        // Mount IDBFS at /persistent for NVRAM and saved disk persistence
+        try {
+          FS.mkdir('/persistent');
+          FS.mount(IDBFS, {}, '/persistent');
+          FS.syncfs(true, function (err) {
+            if (err) console.warn('IDBFS initial sync warning:', err);
+            else console.log('IDBFS mounted & loaded from IndexedDB');
+          });
+        } catch(e) {
+          console.warn('IDBFS mount warning:', e);
+        }
+      }],
+      print: function (text) { console.log(text); },
+      printErr: function (text) { console.error(text); },
+      setStatus: function (text) {
+        window.gssquaredSetStatus(text);
+        if (text === '' && !runtimeReady) {
+          runtimeReady = true;
+          // Keep the startup overlay visually unchanged while the runtime
+          // finishes initializing. Changing its children here causes an
+          // unnecessary second shell redraw before auto-start.
+          // Auto-start / dismiss overlay after 5 seconds.
+          if (autoStartTimer) clearTimeout(autoStartTimer);
+          autoStartTimer = setTimeout(function() {
+            if (overlayElement && overlayElement.style.display !== 'none') {
+              startEmulator();
+            }
+          }, 5000);
+        }
+      },
+      totalDependencies: 0,
+      monitorRunDependencies: function (left) {
+        this.totalDependencies = Math.max(this.totalDependencies, left);
+        Module.setStatus(left ?
+          'Loading assets... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')' :
+          '');
+      }
+    };
+
+    // Browser Pointer Lock requires a user gesture. Capture Mouse may be
+    // dispatched by SDL after the menu click has returned to the browser, so
+    // retry the pending request on the next click inside the canvas.
+    window.gssquaredPointerLockPending = false;
+    function bindPointerLockRetry(canvas) {
+      canvas.addEventListener('click', function () {
+        if (!window.gssquaredPointerLockPending || document.pointerLockElement === Module.canvas) return;
+        window.gssquaredPointerLockPending = false;
+        try {
+          var request = Module.canvas.requestPointerLock();
+          if (request && request.catch) request.catch(function () {});
+        } catch (e) {}
+      });
+    }
+    bindPointerLockRetry(Module.canvas);
+
+    // SDL's Emscripten backend installs native DOM listeners on the canvas.
+    // During an in-page Close Emulation transition an old listener can fire
+    // after its SDL_WindowData has been freed. Replace the DOM node before
+    // destroying that window so those listeners become unreachable; SDL will
+    // bind its new window to the fresh #canvas node.
+    window.gssquaredPrepareCanvasForRestart = function () {
+      var oldCanvas = Module.canvas;
+      if (!oldCanvas || !oldCanvas.parentNode) return;
+      var newCanvas = oldCanvas.cloneNode(true);
+      oldCanvas.parentNode.replaceChild(newCanvas, oldCanvas);
+      Module.canvas = newCanvas;
+      bindPointerLockRetry(newCanvas);
+    };
+
+    Module.setStatus('Downloading core...');
+
+    // SDL_APP_SUCCESS cannot close a browser tab safely: Emscripten turns it
+    // into exit(), which produces a black canvas and an exception message.
+    // Keep the browser confirmation and close attempt in the web shell.
+    window.gssquaredConfirmQuit = function () {
+      if (!window.confirm('Are you sure you want to close this browser tab?')) {
+        if (statusToast) statusToast.textContent = 'Quit cancelled';
+        focusCanvas();
+        return;
+      }
+      function tryCloseTab() {
+        // The _self variant works in a few browsers for tabs opened by a
+        // script, while the normal call covers the remaining implementations.
+        try { window.open('', '_self'); } catch (e) {}
+        try { window.close(); } catch (e) {}
+      }
+
+      tryCloseTab();
+
+      // Browsers refuse window.close() for tabs not opened by script. Replace
+      // the emulator with a calm exit page instead of leaving a black canvas
+      // or showing an error toast. The browser may not permit closing a tab
+      // opened by the user, so provide a useful way back to the emulator.
+      setTimeout(function () {
+        if (document.visibilityState !== 'hidden') {
+          document.body.innerHTML =
+            '<main style="min-height:100vh;display:grid;place-items:center;background:#090d16;color:#e8edf7;font-family:Inter,system-ui,sans-serif;text-align:center;padding:24px">' +
+            '<section><div style="font-size:42px;font-weight:700;letter-spacing:.04em">GS<span style="color:#69d2ff">2</span></div>' +
+            '<h1 style="font-size:24px;margin:18px 0 8px">GSSquared has been closed</h1>' +
+            '<p style="color:#9aa8bd;margin:0 0 22px">The browser kept this tab open.</p>' +
+            '<button onclick="window.location.reload()" style="cursor:pointer;border:1px solid #49627c;border-radius:8px;background:#172538;color:#e8edf7;padding:10px 18px;font:inherit">Back to GSSquared</button></section></main>';
+        }
+      }, 100);
+    };
+
+    // Keyboard Focus Retention
+    function focusCanvas() {
+      if (Module.canvas && typeof Module.canvas.focus === 'function') {
+        Module.canvas.focus();
+      }
+    }
+    window.addEventListener('focus', focusCanvas);
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('.app-header') && !e.target.closest('.modal-backdrop')) {
+        focusCanvas();
+      }
+    });
+
+    // Auto-start after the runtime is ready. Keeping the overlay until the
+    // scheduled start avoids exposing a transient SDL canvas layout.
+    var autoStartTimer = null;
+    function startEmulator() {
+      if (!runtimeReady) return;
+      if (autoStartTimer) {
+        clearTimeout(autoStartTimer);
+        autoStartTimer = null;
+      }
+      overlayElement.style.display = 'none';
+
+      // NOW trigger multiple resizes after overlay is gone
+      // This ensures SDL and canvas are synchronized when the select screen becomes visible
+      window.dispatchEvent(new Event('resize'));
+      setTimeout(function() {
+        window.dispatchEvent(new Event('resize'));
+      }, 16);  // Next frame
+      setTimeout(function() {
+        window.dispatchEvent(new Event('resize'));
+      }, 100);
+      setTimeout(function() {
+        window.dispatchEvent(new Event('resize'));
+      }, 200);
+
+      focusCanvas();
+    }
+
+    // Auto-notify SDL3 whenever #viewport container dimensions change
+    window.gssquaredSsTextMode = false;
+    window.gssquaredResizeSsCanvas = function () {
+      if (!window.gssquaredSsTextMode) return;
+      var canvas = document.getElementById('canvas');
+      var viewport = document.getElementById('viewport');
+      if (!canvas || !viewport) return;
+
+      // Keep the CSS layout at the same 1288x928 logical surface as the
+      // native emulator. SDL/Emscripten handles the high-DPI backing store;
+      // do not divide these layout dimensions by devicePixelRatio.
+      var maxCssWidth = 1288;
+      var maxCssHeight = 928;
+      var scale = Math.min(1,
+                           viewport.clientWidth / maxCssWidth,
+                           viewport.clientHeight / maxCssHeight);
+      if (!(scale > 0)) return;
+      var cssWidth = maxCssWidth * scale;
+      var cssHeight = maxCssHeight * scale;
+      canvas.style.aspectRatio = '1288 / 928';
+      canvas.style.width = cssWidth + 'px';
+      canvas.style.height = cssHeight + 'px';
+      canvas.style.maxWidth = 'none';
+      canvas.style.maxHeight = 'none';
+    };
+
+    if (typeof ResizeObserver !== 'undefined') {
+      var ro = new ResizeObserver(function() {
+        if (window.gssquaredResizeSsCanvas) window.gssquaredResizeSsCanvas();
+        window.dispatchEvent(new Event('resize'));
+      });
+      var vp = document.getElementById('viewport');
+      if (vp) ro.observe(vp);
+    }
+
+    // UI Buttons & Modals
+    var modalHotkeys = document.getElementById('modal-hotkeys');
+
+    document.getElementById('btn-hotkeys').addEventListener('click', function() {
+      modalHotkeys.classList.add('active');
+    });
+    document.getElementById('btn-enter-control-panel').addEventListener('click', function() {
+      if (Module.ccall) {
+        Module.ccall('gssquared_enter_control_panel', 'void', [], []);
+      }
+      modalHotkeys.classList.remove('active');
+    });
+    document.getElementById('close-hotkeys').addEventListener('click', function() {
+      modalHotkeys.classList.remove('active');
+    });
+
+    // Fullscreen Toggle
+    document.getElementById('btn-fullscreen').addEventListener('click', function() {
+      var elem = document.getElementById('app-container');
+      if (!document.fullscreenElement) {
+        elem.requestFullscreen().catch(function(err) { console.error(err); });
+      } else {
+        document.exitFullscreen();
+      }
+    });
+
+    // Audio Mute Toggle. SDL3's Emscripten backend stores the Web Audio
+    // context under Module.SDL3; the old SDL2.audioContext path is unused.
+    function getWebAudioContext() {
+      if (typeof Module !== 'undefined' && Module.SDL3 && Module.SDL3.audioContext) {
+        return Module.SDL3.audioContext;
+      }
+      if (typeof SDL3 !== 'undefined' && SDL3.audioContext) {
+        return SDL3.audioContext;
+      }
+      if (typeof SDL2 !== 'undefined' && SDL2.audioContext) {
+        return SDL2.audioContext;
+      }
+      return null;
+    }
+
+    document.getElementById('btn-audio').addEventListener('click', function() {
+      audioMuted = !audioMuted;
+      var audioContext = getWebAudioContext();
+      if (audioMuted) {
+        audioIcon.className = 'fa-solid fa-volume-xmark';
+        if (audioContext) audioContext.suspend();
+      } else {
+        audioIcon.className = 'fa-solid fa-volume-high';
+        if (audioContext) audioContext.resume();
+      }
+    });
+
+    // Persistent Storage (IDBFS) Sync Helper
+    function syncPersistentStorage() {
+      if (typeof FS !== 'undefined' && FS.syncfs) {
+        FS.syncfs(false, function (err) {
+          if (err) console.error('IDBFS sync error:', err);
+          else console.log('IDBFS saved to IndexedDB');
+        });
+      }
+    }
+    window.addEventListener('beforeunload', syncPersistentStorage);
+    setInterval(syncPersistentStorage, 15000);
+
+    // The COI service worker above is required for COOP/COEP and pthreads.
+    // Do not install a second cache service worker for the emulator assets:
+    // on GitHub Pages it can serve an older .data/.wasm pair after refresh,
+    // leaving Emscripten stuck at the final preload dependency (67/68).
+    // Unregister the previous sw.js worker once for existing visitors.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        var stale = registrations.filter(function(reg) {
+          return reg.active && /\/sw\.js$/.test(reg.active.scriptURL);
+        });
+        if (!stale.length) return;
+        Promise.all(stale.map(function(reg) { return reg.unregister(); })).then(function() {
+          window.location.reload();
+        });
+      });
+    }
+
+    window.onerror = function (msg) {
+      Module.setStatus('Exception thrown, see JS console');
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>
+

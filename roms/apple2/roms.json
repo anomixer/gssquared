@@ -1,0 +1,49 @@
+{
+    "name": "Apple II",
+    "roms": [
+        {
+            "type": "main",
+            "output": "main.rom",
+            "base_address": "0xE000",
+            "size": 8192,
+            "parts": [
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II/ROM%20Images/Apple%20II%20ROM%20Pages%20E0-E7%20-%20341-0001%20-%20Integer%20BASIC.bin",
+                    "filename": "341-0001.bin",
+                    "address": "0xE000",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II/ROM%20Images/Apple%20II%20ROM%20Pages%20E8-EF%20-%20341-0002%20-%20Integer%20BASIC.bin",
+                    "filename": "341-0002.bin",
+                    "address": "0xE800",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II/ROM%20Images/Apple%20II%20ROM%20Pages%20F0-F7%20-%20341-0003%20-%20Integer%20BASIC.bin",
+                    "filename": "341-0003.bin",
+                    "address": "0xF000",
+                    "size": 2048
+                },
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II/ROM%20Images/Apple%20II%20ROM%20Pages%20F8-FF%20-%20341-0004%20-%20Original%20Monitor.bin",
+                    "filename": "341-0004.bin",
+                    "address": "0xF800",
+                    "size": 2048
+                }
+            ]
+        },
+        {
+            "type": "character",
+            "output": "char.rom",
+            "size": 2048,
+            "parts": [
+                {
+                    "url": "https://mirrors.apple2.org.za/Apple%20II%20Documentation%20Project/Computers/Apple%20II/Apple%20II%20plus/ROM%20Images/Apple%20II%20plus%20Video%20ROM%20-%20341-0036%20-%20Rev.%207.bin",
+                    "filename": "341-0036.bin",
+                    "size": 2048
+                }
+            ]
+        }
+    ]
+} 

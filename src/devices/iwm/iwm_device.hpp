@@ -1,0 +1,18 @@
+#pragma once
+
+#include <cstdint>
+#include "SlotData.hpp"
+
+class computer_t;
+class IWM;
+
+struct iwm_state_t {
+    computer_t *computer;
+    uint8_t status = 0;
+    uint8_t control = 0;
+    uint8_t data = 0;
+    
+    IWM *iwm;   
+};
+
+void init_iwm_slot(computer_t *computer, SlotType_t slot);

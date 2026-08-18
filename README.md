@@ -1,0 +1,278 @@
+# GSSquared - A Complete Apple II Series Emulator.
+
+(For the new GSSquared Web Site, check out https://gssquared.net)
+
+GSSquared is a complete emulator for the Apple II series of computers.
+
+GSSquared has three primary design goals: support both 8- and 16-bit Apple IIs; be cross-platform; have a simple, intuitive user interface and be packaged 100% ready to go.
+
+To my knowledge, it is the only emulator besides MAME that models (most of) the 8-bit Apple II as well as the 16-bit Apple IIgs:
+
+* Apple ][
+* Apple ][+
+* Apple //e
+* Apple //e Enhanced
+* Apple //e Enhanced with 65816 CPU
+* Apple IIgs
+
+It is written in C++ and runs on:
+* Windows
+* Linux
+* macOS
+
+It has an intuitive user interface and is 100% ready to run without any other downloads.
+
+I think these characteristics make GSSquared unique among Apple II emulators.
+
+It uses the SDL3 library for graphics, sound, and I/O. This is a video game-oriented library and suits an emulator well. It's what made building across three (very different) platforms work.
+
+
+# Documentation
+
+Check out the [User Documentation](Docs/index.md) for detailed instructions on how to use GSSquared.
+
+# Pre-compiled Packages
+
+A binary release is available at [https://github.com/jawaidbazyar2/gssquared/releases](https://github.com/jawaidbazyar2/gssquared/releases).
+
+For the Mac, after downloading you will need to tell MacOS the software is A-OK even though it's from the Internet.
+
+```
+% xattr -d com.apple.quarantine gssquared.dmg 
+```
+
+or
+```
+xattr -d com.apple.quarantine /Applications/gssquared.app
+```
+
+# Building
+
+The code base builds and has been tested on:
+* MacBook Pro M1
+* Mac Intel
+* Mac Mini M4
+* Ubuntu Linux 22.04 (x64 AMD)
+
+General Build Instructions:
+
+To build GSSquared, you will need the following:
+* clang C compiler or GCC
+* SDL3 downloaded and built from the SDL web site. (Specific steps for this are below.)
+* git
+
+I use vscode as my IDE, but, this isn't required to build.
+
+Note that GSSquared tries to force-select Clang as the compiler. If you want to override that you can edit the top of the CMakeLists and remove the clang-selection logic.
+
+NOTE: the build process has been updated so that builds are done in and to the build/ directory, as opposed to prior versions of GS2 where builds were done into the project root directory.
+
+GSSquared should also build with GCC on Ubuntu 22.04 or later, but this hasn't been tested.
+
+
+## Build for Production
+
+Production builds are optimized for performance.
+
+```
+cmake -DCMAKE_BUILD_TYPE=Release -S . -B build
+```
+
+## Build for Debug
+
+Debug enables a variety of assertions, turns off optimizations, and enables memory leak and buffer overrun checking.
+
+```
+cmake -DCMAKE_BUILD_TYPE=Debug -S . -B build
+```
+
+## macOS
+
+GSSquared will build on both Intel and Apple Silicon Macs.
+
+You will need:
+* Mac OSX 12 SDK, either Command-line or full Xcode.
+
+```
+git clone --recurse-submodules https://github.com/jawaidbazyar2/gssquared.git
+cd gssquared
+```
+
+If you just want to do a standard build that will result in a Mac App Bundle,
+
+```
+cmake -DGS2_PROGRAM_FILES=OFF  -DCMAKE_BUILD_TYPE=Release -S . -B build
+cmake --build build --parallel
+cmake --install build
+```
+
+This will "install" an App Bundle into the build/ directory, named GSSquared.app. (Or in Finder, just GSSquared)
+
+### Mac DMG Disk Image
+
+To go further and build a Mac Disk Image (.dmg file), do this from project root after doing the above build,
+
+```
+cmake --build build --target package
+```
+
+The app bundle and .dmg file are built into the packages/ directory.
+
+### Mac PROGRAM FILES Mode
+
+PROGRAM FILES Mode will just build executable into build/ (named GSSquared) suitable for execution from the command-line.
+
+```
+cmake -DGS2_PROGRAM_FILES=ON  -DCMAKE_BUILD_TYPE=Release -S . -B build
+cmake --build build
+build/GSSquared
+```
+
+You may also use -DCMAKE\_BUILD\_TYPE=Debug , which will disable optimizations, and include debugger symbols in the result.
+
+### Mac Architecture
+
+By default, GSSquared builds as a "Fat Binary" or Dual-Architecture binary for both Apple Silicon and Intel CPUs.
+
+If for some reason you want to build only for your native architecture:
+
+```
+cmake -DBUILD_NATIVE=ON  -DCMAKE_BUILD_TYPE=Release -S . -B build
+```
+
+
+## Linux
+
+gs2 Linux build has been tested on:
+
+* Ubuntu 22.04
+* clang 14
+
+You need the following libraries installed:
+* libasound2-dev
+* libpulse-dev
+* libudev-dev
+* libimgui-dev
+
+```
+git clone --recurse-submodules https://github.com/jawaidbazyar2/gssquared.git
+cd gssquared
+```
+
+Then to build:
+
+```
+cmake -DCMAKE_BUILD_TYPE=Release -S . -B build
+cmake --build build
+```
+
+Alternatively, build in the "GNU install directories" style:
+```
+cmake -DCMAKE_BUILD_TYPE=Release -DGS2_PROGRAM_FILES=OFF -S . -B build
+cmake --build build
+cmake --install build
+```
+Now you should be able to run gs2 at command line anywhere via a `GSSquared`
+command, and it should also be available as an application from your
+applications list.
+
+### Linux App Distribution
+
+After building, you can create a folder that contains a complete package for Linux:
+
+```
+cmake -DCMAKE_BUILD_TYPE=Release -DGS2_PROGRAM_FILES=OFF -S . -B build
+cmake --build build
+cmake --build build --target appimage
+```
+
+Creates a .appimage package in the build/ directory that contains all the pieces you need.
+
+## Windows
+
+We've successfully built for windows using the following environment:
+
+* git bash
+* mingw
+* clang
+* VS Code
+
+```
+git clone --recurse-submodules https://github.com/jawaidbazyar2/gssquared.git
+cd gssquared
+mkdir build
+cmake -G "MinGW Makefiles" -DGS2_PROGRAM_FILES=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -B build -S .
+cmake --build build --parallel
+```
+
+### Windows App Distribution
+
+After building, you can create a ZIP archive for distribution for Windows.
+
+```
+cmake -G "MinGW Makefiles" -DGS2_PROGRAM_FILES=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -B build -S .
+cmake --build build --parallel --target package
+```
+
+
+# Affiliated Programs
+
+If you build from source, you will also get a couple of other programs:
+
+## diskid
+
+Analyzes a disk image and prints information about it.
+
+## nibblizer
+
+Convert a disk image file (140K 5.25 .do, .po, .dsk) to nibblized format (e.g. .nib). For testing. 
+
+## gstrace
+
+Decodes a stored CPU trace file.
+
+# Acknowledgements
+
+## OpenEmulator
+
+I took the concept of the DisplayNG code from OpenEmulator, under GPL 3. 
+https://github.com/openemulator/openemulator/blob/master/AUTHORS
+
+I also shamelessly copied the Disk II sound files from OpenEmulator.
+
+## KEGS
+
+The mouse tracking code is based in part on the technique used in KEGS, written by Geoff Weiss, though I use a different approach for causing updates to the emulated mouse position. GPL 2.0.
+
+## Apple Mouse III card
+
+The Apple Mouse II Interface Card emulation (PIA + 6805 protocol) is adapted from the [A2Pico mouse-interface](https://github.com/oliverschmidt/mouse-interface) firmware by Thorsten Brehm and Oliver Schmidt (MIT License).
+
+## Mike Neil
+
+for the lookup table approach to the new DisplayNG code.
+
+## William Simms
+
+for cycle-accurate video framework.
+
+## Kelvin Sherlock
+
+Kelvin wrote the Host FST and associated support code for the GSPlus emulator. GPL 2.0.
+
+https://github.com/digarok/gsplus
+
+## Oliver Schmidt
+
+The Apple Mouse II support is derived from work by Oliver Schmidt
+
+https://github.com/oliverschmidt/a2pico
+
+## Wyatt Wong
+
+for helping test in different build environments, and providing MacOS-Intel builds.
+
+
+## SDL
+
+All the amazing people in the SDL Discord, especially Sam!
