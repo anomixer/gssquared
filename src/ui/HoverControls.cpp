@@ -96,6 +96,16 @@ HoverControls_t::HoverControls_t(UIContext *ctx, const Style_t& initial_style, c
 }
 
 void HoverControls_t::update() {
+#if defined(__EMSCRIPTEN__)
+    // The browser build has no functional in-emulator debugger and exposes
+    // these controls through the a2g host shell instead. Keep the hover rail
+    // out of the gameplay viewport; keyboard shortcuts and F4 remain intact.
+    set_visible(false);
+    hov_speed_con->set_visible(false);
+    hov_display_con->set_visible(false);
+    return;
+#endif
+
     if (mi->isMouseCaptured()) {
         set_visible(false);
     } else {
