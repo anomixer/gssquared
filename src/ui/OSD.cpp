@@ -478,6 +478,11 @@ OSD::OSD(computer_t *computer, SDL_Renderer *rendererp, SDL_Window *windowp, Slo
     open_btn->size(36, 36);
     open_btn->set_position(0, 50);
     open_btn->set_fade_frames(512, 4); // hold for one second, then fade out over next second. (roughly)
+#if defined(__EMSCRIPTEN__)
+    // In the browser, keep the drawer keyboard-driven so the mouse affordance
+    // cannot cover gameplay. F4 continues to toggle the panel in event().
+    open_btn->set_visible(false);
+#endif
 
     Style_t SB;
     SB.background_color = 0x00000000;
