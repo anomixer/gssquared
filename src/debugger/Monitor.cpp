@@ -833,7 +833,7 @@ void Monitor::cmd_slookup() {
 
 void Monitor::cmd_sclear() {
     trace_->clear_labels();
-    addFormattedOutput("Cleared symbol table");
+    addOutput("Cleared symbol table");
 }
 
 void Monitor::cmd_map() {
