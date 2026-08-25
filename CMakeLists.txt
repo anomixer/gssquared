@@ -467,7 +467,18 @@ add_library(gs2_computer src/computer.cpp )
 
 add_library(gs2_event_dispatcher src/util/EventDispatcher.cpp )
 
-add_library(gs2_serial_devices src/serial_devices/SerialDevice.cpp
+if(APPLE)
+    set(GS2_HOST_SERIAL_SRC src/serial_devices/host/HostSerial_macos.cpp)
+elseif(WIN32)
+    set(GS2_HOST_SERIAL_SRC src/serial_devices/host/HostSerial_win32.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(GS2_HOST_SERIAL_SRC src/serial_devices/host/HostSerial_linux.cpp)
+else()
+    set(GS2_HOST_SERIAL_SRC src/serial_devices/host/HostSerial_stub.cpp)
+endif()
+add_library(gs2_serial_devices
+    src/serial_devices/SerialDevice.cpp
+    ${GS2_HOST_SERIAL_SRC}
 )
 add_library(gs2_util src/util/media.cpp src/util/apm.cpp src/util/ResourceFile.cpp src/util/dialog.cpp src/util/mount.cpp
     src/util/Connections.cpp
@@ -595,7 +606,7 @@ target_link_libraries(gs2_video_scanner PUBLIC gs2_displaypp)
 add_library(gs2_devices_rtc_pram src/devices/rtc/rtc_pram.cpp)
 target_link_libraries(gs2_devices_rtc_pram PUBLIC gs2_paths)
 
-target_link_libraries(gs2_ui ${GS2_SDL3_IMAGE} ${GS2_SDL3_TTF} gs2_systemconfig gs2_devices_hostfst)
+target_link_libraries(gs2_ui ${GS2_SDL3_IMAGE} ${GS2_SDL3_TTF} gs2_systemconfig gs2_devices_hostfst gs2_serial_devices)
 target_link_libraries(gs2_debugger gs2_trace gs2_util gs2_displaypp ${GS2_SDL3} ${GS2_SDL3_TTF})
 if(WIN32)
     target_link_libraries(gs2_debugger ws2_32)
