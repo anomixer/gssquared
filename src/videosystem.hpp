@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <SDL3/SDL.h>
 #include <functional>
 #include <map>
@@ -143,10 +144,11 @@ public:
     void sync_window();
     void render_frame(SDL_Texture *texture, SDL_FRect *srcrect, SDL_FRect *dstadj, bool respect_mode = true,
         const SDL_FRect *content_inset_src = nullptr);
-    // Render a frame into an explicitly calculated destination rectangle.
-    // Used by Second Sight so its image can start below the in-canvas menu bar.
-    void render_frame_rect(SDL_Texture *texture, SDL_FRect *srcrect, const SDL_FRect *dstrect,
-        bool respect_mode = true);
+    // Present a framebuffer with no baked-in bezel (Second Sight VGA, GPU, text).
+    // Fills the Apple II border area and blits src into the same content hole
+    // Mega II modes use (BASE_WIDTH x BASE_HEIGHT inside the 644x232 canvas).
+    void render_frame_vga(SDL_Texture *texture, SDL_FRect *srcrect,
+        uint8_t border_r, uint8_t border_g, uint8_t border_b, bool respect_mode = true);
     void clear();
     void present();
     bool display_capture_mouse(bool capture);

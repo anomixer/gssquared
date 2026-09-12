@@ -19,11 +19,15 @@
 #include "mmus/mmu_ii.hpp"
 #include "ss_a2_text_sync.hpp"
 #include "ss_host_text.hpp"
+#include "ss_gpu_text.hpp"
 #include "util/SystemSettings.hpp"
 #include "display/display.hpp"
 #include "Module_ID.hpp"
 
 struct computer_t;
+
+void secondsight_log_yield_mux(computer_t *computer, const char *why,
+    bool yielded, uint16_t old_vga, uint16_t new_vga);
 
 #define SECOND_SIGHT_FB_SIZE 1024 * 1024
 /** Z180 SRAM ($00/0000–$01/FFFF per Second Sight memory map). */
@@ -37,6 +41,7 @@ enum ss_display_mode_t {
     SS_MODE_PPU = 2,
     SS_MODE_GPU = 3,
     SS_MODE_HOSTTEXT = 4,
+    SS_MODE_GPUTEXT = 5,
 };
 
 class SecondSight {
@@ -88,8 +93,14 @@ class SecondSight {
     CmdHandler cmd_table_ppu[256] = {};
     CmdHandler cmd_table_gpu[256] = {};
     CmdHandler cmd_table_hosttext[256] = {};
+    CmdHandler cmd_table_gputext[256] = {};
     CmdHandler *cmd_table = cmd_table_emu;
     SsGpu gpu;
+    SsGpuText gpu_text;
+    uint32_t gpu_text_frame = 0;
+    bool gputext_hs_terminal_consumed = false;
+    bool gputext_hs_off_consumed = false;
+    bool gputext_logged_mega_ii = false;
 
     bool host_text_armed = false;
     uint16_t host_text_ctrl_addr = 0;
@@ -97,7 +108,7 @@ class SecondSight {
     ss_host_text_ctrl_t host_text_latch{};
     ss_host_text_raster_t host_text_raster{};
     uint32_t host_text_frame = 0;
-    uint8_t host_text_border = 0;
+    uint8_t host_text_border = 0; // SetBorder palette index (window bezel + Host Text blank)
 
     union {
         uint8_t user_mode_data[84] = {0};
@@ -190,7 +201,13 @@ class SecondSight {
     }
 
     bool host_text_is_8x8() const {
-        return ss_mode == SS_MODE_HOSTTEXT && host_text_raster.cell_h == 8;
+        if (ss_mode == SS_MODE_HOSTTEXT) {
+            return host_text_raster.cell_h == 8;
+        }
+        if (ss_mode == SS_MODE_GPUTEXT) {
+            return gpu_text.raster().cell_h == 8;
+        }
+        return false;
     }
 
     void apply_text_font(uint8_t font_index) {
@@ -292,36 +309,10 @@ class SecondSight {
             vga_text_9x16_restore_ibm_palette();
         }
         if (tex_text) {
-            SDL_FRect dst_rect = vs->target;
-            const SDL_FRect *dst_rect_ptr = nullptr;
-            if (vs->target.w > 0.0f && vs->target.h > 0.0f) {
-                const float source_w = (float)(cols * VGA_TEXT_CELL_W);
-                const float source_h = (float)VGA_TEXT_SCREEN_H;
-                float menu_h = 0.0f;
-#ifdef __EMSCRIPTEN__
-                int window_h = 0;
-                int output_w = 0, output_h = 0;
-                SDL_GetWindowSize(vs->window, nullptr, &window_h);
-                SDL_GetCurrentRenderOutputSize(vs->renderer, &output_w, &output_h);
-                if (window_h > 0 && output_h > 0) {
-                    // The web File/Edit/Machine bar is rendered inside the
-                    // canvas and is approximately 26 window points high.
-                    menu_h = 26.0f * (float)output_h / (float)window_h;
-                }
-#endif
-                const float available_h = std::max(0.0f, vs->target.h - menu_h);
-                const float fitted_w = std::min(vs->target.w,
-                    available_h * source_w / source_h);
-                const float fitted_h = fitted_w * source_h / source_w;
-                dst_rect.x = vs->target.x + (vs->target.w - fitted_w) * 0.5f;
-                dst_rect.y = vs->target.y + menu_h
-                    + (available_h - fitted_h) * 0.5f;
-                dst_rect.w = fitted_w;
-                dst_rect.h = fitted_h;
-                dst_rect_ptr = &dst_rect;
-            }
+            uint8_t br = 0, bg = 0, bb = 0;
+            resolve_ss_bezel(&br, &bg, &bb);
             vga_render_text_9x16(vs, tex_text, display_base, text_pitch,
-                vga_text_vram_layout_t::Interleaved, cols, nullptr, dst_rect_ptr);
+                vga_text_vram_layout_t::Interleaved, cols, br, bg, bb);
         }
     }
 
@@ -497,6 +488,7 @@ class SecondSight {
             case SS_MODE_PPU: return "ppu";
             case SS_MODE_GPU: return "gpu";
             case SS_MODE_HOSTTEXT: return "hosttext";
+            case SS_MODE_GPUTEXT: return "gputext";
         }
         return "?";
     }
@@ -529,6 +521,27 @@ class SecondSight {
         host_text_frame = 0;
     }
 
+    void resolve_ss_bezel(uint8_t *r, uint8_t *g, uint8_t *b) const {
+        const bool text = is_text_mode() || ss_mode == SS_MODE_HOSTTEXT || ss_mode == SS_MODE_GPUTEXT;
+        if (text) {
+            const uint32_t *pal = vga_text_palette();
+            const uint32_t c = pal[host_text_border & 0x0F];
+            *r = (uint8_t)((c >> 16) & 0xFF);
+            *g = (uint8_t)((c >> 8) & 0xFF);
+            *b = (uint8_t)(c & 0xFF);
+            return;
+        }
+        *r = palette_rgb[host_text_border][0];
+        *g = palette_rgb[host_text_border][1];
+        *b = palette_rgb[host_text_border][2];
+    }
+
+    void present_ss_texture(SDL_Texture *tex, SDL_FRect *src, bool respect_mode = true) {
+        uint8_t r = 0, g = 0, b = 0;
+        resolve_ss_bezel(&r, &g, &b);
+        vs->render_frame_vga(tex, src, r, g, b, respect_mode);
+    }
+
     void present_host_text_cells(const uint8_t *dst, int pitch, bool overlay_cursor = false) {
         if (!tex_text) {
             return;
@@ -556,7 +569,7 @@ class SecondSight {
         const float src_w = (float)((int)host_text_raster.cols * (int)host_text_raster.cell_w);
         const float src_h = (float)((int)host_text_raster.vis_rows * (int)host_text_raster.cell_h);
         SDL_FRect src = { 0.0f, 0.0f, src_w, src_h };
-        vs->render_frame(tex_text, &src, nullptr);
+        present_ss_texture(tex_text, &src);
     }
 
     void apply_host_text_mode(uint8_t mode_num) {
@@ -565,6 +578,7 @@ class SecondSight {
             return;
         }
         leave_gpu_if_needed();
+        leave_gpu_text_if_needed();
         const bool already = (ss_mode == SS_MODE_HOSTTEXT);
         if (!already) {
             unarm_host_text();
@@ -653,6 +667,133 @@ class SecondSight {
         return true;
     }
 
+    void unarm_gpu_text() {
+        if (ss_mode == SS_MODE_GPUTEXT || gpu_text.is_active()) {
+            printf("SecondSight: leave GPUText (was mode=%s vga_active=%u yielded=%d)\n",
+                ss_mode_label(ss_mode), vga_active, gpu_text.yielded() ? 1 : 0);
+            fflush(stdout);
+        }
+        gpu_text.leave();
+        gpu_text_frame = 0;
+        gputext_hs_terminal_consumed = false;
+        gputext_hs_off_consumed = false;
+        gputext_logged_mega_ii = false;
+    }
+
+    /** $95: flip vga_active only. Do not leave GPU Text or discard VRAM. */
+    void apply_gpu_text_yield(const char *why) {
+        if (ss_mode != SS_MODE_GPUTEXT || !gpu_text.is_active()) {
+            return;
+        }
+        const uint16_t next = gpu_text.yielded() ? 0 : 1;
+        if (next != vga_active) {
+            secondsight_log_yield_mux(computer, why, gpu_text.yielded(), vga_active, next);
+        }
+        vga_active = next;
+    }
+
+    void apply_gpu_text_mode(uint8_t mode_num) {
+        leave_gpu_if_needed();
+        const bool already = (ss_mode == SS_MODE_GPUTEXT);
+        if (!already) {
+            unarm_host_text();
+            vga_text_9x16_restore_ibm_palette();
+        }
+        if (!gpu_text.enter(mode_num)) {
+            return;
+        }
+        const ss_host_text_raster_t &raster = gpu_text.raster();
+        ss_mode = SS_MODE_GPUTEXT;
+        vga_active = 1;
+        display_enabled = 1;
+        vga_mode_num = mode_num;
+        res_x = raster.pix_w;
+        res_y = raster.pix_h;
+        fb_pitch = (uint16_t)(raster.cols * 2);
+        crt_char_width = raster.cell_w;
+        screen_base_addr = 0x010000;
+        current_vga_mode = {};
+        current_vga_mode.vgamode = true;
+        current_vga_mode.graphics = TG_TEXT;
+        current_vga_mode.width = raster.cols;
+        current_vga_mode.height = raster.vis_rows;
+        current_vga_mode.color_depth = 4;
+        apply_text_font(text_font_index);
+        cmd_table = cmd_table_gputext;
+        gpu_text_frame = 0;
+        gputext_logged_mega_ii = false;
+        printf("SecondSight: GPU Text mode %ux%u %ux%u cells\n",
+            raster.cols, raster.vis_rows, raster.cell_w, raster.cell_h);
+    }
+
+    void present_gpu_text_cells(const uint8_t *dst, int pitch, bool overlay_cursor) {
+        if (!tex_text || !dst) {
+            return;
+        }
+        const ss_host_text_raster_t &raster = gpu_text.raster();
+        void *pixels = nullptr;
+        int tex_pitch = 0;
+        if (SDL_LockTexture(tex_text, nullptr, &pixels, &tex_pitch)) {
+            if (raster.cell_h == 8) {
+                vga_raster_text_8x8(dst, pitch, (uint32_t *)pixels, tex_pitch,
+                    vga_text_vram_layout_t::Interleaved,
+                    (int)raster.cols, (int)raster.vis_rows);
+            } else {
+                vga_raster_text_9x16(dst, pitch, (uint32_t *)pixels, tex_pitch,
+                    vga_text_vram_layout_t::Interleaved, (int)raster.cols);
+            }
+            if (overlay_cursor) {
+                const bool blink_on = ((gpu_text_frame / 15) & 1) != 0;
+                const uint16_t style = gpu_text.cursor_style();
+                const int cx = (int)gpu_text.cursor_x();
+                const int cy = (int)gpu_text.cursor_y();
+                uint8_t draw_attr = gpu_text.current_attr();
+                if ((style & SS_HT_CS_REPLACE) == 0) {
+                    const uint8_t *cell = gpu_text.cell_at(cx, cy);
+                    if (cell) {
+                        draw_attr = cell[1];
+                    }
+                }
+                ss_text_overlay_cursor((uint32_t *)pixels, tex_pitch, dst, pitch,
+                    cx, cy, (int)raster.cols, (int)raster.vis_rows,
+                    style, draw_attr, blink_on,
+                    (int)raster.cell_w, (int)raster.cell_h, (int)raster.vis_rows);
+            }
+            SDL_UnlockTexture(tex_text);
+        }
+        const float src_w = (float)((int)raster.cols * (int)raster.cell_w);
+        const float src_h = (float)((int)raster.vis_rows * (int)raster.cell_h);
+        SDL_FRect src = { 0.0f, 0.0f, src_w, src_h };
+        present_ss_texture(tex_text, &src);
+    }
+
+    bool frame_gpu_text() {
+        if (!gpu_text.sync_immediate()) {
+            gpu_text.drain();
+        }
+        apply_gpu_text_yield("frame");
+        if (!vga_active) {
+            if (!gputext_logged_mega_ii) {
+                gputext_logged_mega_ii = true;
+                printf("SecondSight: frame_gpu_text → Mega II (yielded=%d active=%d)\n",
+                    gpu_text.yielded() ? 1 : 0, gpu_text.is_active() ? 1 : 0);
+                fflush(stdout);
+            }
+            return false; /* yielded — Mega II scanout; VRAM stays */
+        }
+        if (!display_enabled) {
+            return true; /* ScreenOff: black, we still own VGA */
+        }
+        const uint8_t *dst = gpu_text.cells();
+        const int pitch = gpu_text.cell_pitch();
+        if (!dst || pitch <= 0) {
+            return true;
+        }
+        gpu_text_frame++;
+        present_gpu_text_cells(dst, pitch, true);
+        return true;
+    }
+
     void sync_ppu_registers_from_a2(ppu_config_t &cfg) {
         const uint8_t *regs = a2_ram + SS_PPU_REGS_ADDR;
         cfg.scroll_x = ss_ppu_read_reg16(regs, SS_PPU_REG_SCROLL_X);
@@ -681,8 +822,10 @@ class SecondSight {
         memcpy(palette_rgb, a2_ram + SS_PPU_PALETTE_ADDR, SS_PPU_PALETTE_BYTES);
         sync_vga_palette_from_rgb();
 
+        uint8_t br = 0, bg = 0, bb = 0;
+        resolve_ss_bezel(&br, &bg, &bb);
         vga_render_8bpp(vs, tex_24bpp, rgb24_buffer, palette_rgb,
-            frame_buffer + SS_PPU_FB_PAGE1_ADDR, PPU_FB_W, PPU_FB_W, PPU_FB_H);
+            frame_buffer + SS_PPU_FB_PAGE1_ADDR, PPU_FB_W, PPU_FB_W, PPU_FB_H, br, bg, bb);
         return true;
     }
 
@@ -764,6 +907,7 @@ class SecondSight {
             fb_pitch = 0;
             unarm_host_text();
             host_text_raster = {};
+            unarm_gpu_text();
         }
 
         uint8_t *dma_address = nullptr;
@@ -856,12 +1000,20 @@ class SecondSight {
             }
         }
 
+        void leave_gpu_text_if_needed() {
+            if (ss_mode == SS_MODE_GPUTEXT) {
+                unarm_gpu_text();
+                apply_text_font(text_font_index);
+            }
+        }
+
         void select_cmd_table() {
             switch (ss_mode) {
                 case SS_MODE_GPU: cmd_table = cmd_table_gpu; break;
                 case SS_MODE_PPU: cmd_table = cmd_table_ppu; break;
                 case SS_MODE_VGA: cmd_table = cmd_table_vga; break;
                 case SS_MODE_HOSTTEXT: cmd_table = cmd_table_hosttext; break;
+                case SS_MODE_GPUTEXT: cmd_table = cmd_table_gputext; break;
                 default: cmd_table = cmd_table_emu; break;
             }
         }
@@ -1109,6 +1261,7 @@ class SecondSight {
             //   $02: PPU mode
             //   $03: GPU mode
             //   $04: Host Text mode
+            //   $05: GPU Text mode
             // look for mode, if we don't find it then error.
 
             if (command_step == 1) {
@@ -1118,8 +1271,23 @@ class SecondSight {
                 const uint8_t mode_num = cmd_buffer[1];
                 uint8_t result = 0xA5;
 
-                if (emu_flag == 0x04) {
+                if (emu_flag == 0x05) {
                     leave_gpu_if_needed();
+                    leave_host_text_if_needed();
+                    ss_host_text_raster_t raster{};
+                    if (!ss_host_text_lookup_raster(mode_num, &raster)) {
+                        result = 0xA6;
+                        leave_gpu_text_if_needed();
+                        ss_mode = SS_MODE_EMU;
+                        vga_active = 0;
+                        cmd_table = cmd_table_emu;
+                        printf("SecondSight: SetMode gputext rejected mode=%02X\n", mode_num);
+                    } else {
+                        apply_gpu_text_mode(mode_num);
+                    }
+                } else if (emu_flag == 0x04) {
+                    leave_gpu_if_needed();
+                    leave_gpu_text_if_needed();
                     ss_host_text_raster_t raster{};
                     if (!ss_host_text_lookup_raster(mode_num, &raster)) {
                         result = 0xA6;
@@ -1133,6 +1301,7 @@ class SecondSight {
                     }
                 } else if (emu_flag == 0x03) {
                     leave_host_text_if_needed();
+                    leave_gpu_text_if_needed();
                     vga_mode_t gm{};
                     if (!lookup_gpu_graphics_mode(mode_num, &gm)) {
                         result = 0xA6;
@@ -1150,10 +1319,12 @@ class SecondSight {
                 } else if (emu_flag == 0x02) {
                     leave_host_text_if_needed();
                     leave_gpu_if_needed();
+                    leave_gpu_text_if_needed();
                     apply_ppu_mode();
                 } else if (mode_num == 0xFF) {
                     leave_host_text_if_needed();
                     leave_gpu_if_needed();
+                    leave_gpu_text_if_needed();
                     mode_info info;
                     analyze_vga_mode(&user_mode_rec, &info);
                     apply_analyzed_mode(&user_mode_rec, &info);
@@ -1168,6 +1339,7 @@ class SecondSight {
                 } else {
                     leave_host_text_if_needed();
                     leave_gpu_if_needed();
+                    leave_gpu_text_if_needed();
                     if (mode_num == 0x03) {
                         apply_rom_vga_mode(&SS_ROM_VGA_TEXT_80X25, 0x03);
                     } else if (mode_num == 0x01) {
@@ -1198,6 +1370,9 @@ class SecondSight {
                     select_cmd_table();
                 }
                 trigger_longrun_wait(result);
+                printf("SecondSight: SetMode mode=%02X flag=%02X result=%02X → %s vga_active=%u\n",
+                    mode_num, emu_flag, result, ss_mode_label(ss_mode), vga_active);
+                fflush(stdout);
             }
             display_enabled = 1;
         }
@@ -1218,6 +1393,7 @@ class SecondSight {
                 apply_analyzed_mode(&user_mode_rec, &info);
                 leave_host_text_if_needed();
                 leave_gpu_if_needed();
+                leave_gpu_text_if_needed();
                 ss_mode = SS_MODE_VGA;
                 vga_active = 1;
                 select_cmd_table();
@@ -1383,7 +1559,7 @@ class SecondSight {
             } else if (command_step == 4) {
                 // DMA wrote 768 bytes of RGB triplets into palette_rgb.
                 sync_vga_palette_from_rgb();
-                if (ss_mode == SS_MODE_HOSTTEXT) {
+                if (ss_mode == SS_MODE_HOSTTEXT || ss_mode == SS_MODE_GPUTEXT) {
                     vga_text_9x16_set_palette_rgb((const uint8_t *)palette_rgb);
                 }
                 command_step = 0;
@@ -1401,7 +1577,7 @@ class SecondSight {
                 uint8_t green = cmd_buffer[3];
                 uint8_t blue = cmd_buffer[4];
                 set_palette_entry(index, red, green, blue);
-                if (ss_mode == SS_MODE_HOSTTEXT) {
+                if (ss_mode == SS_MODE_HOSTTEXT || ss_mode == SS_MODE_GPUTEXT) {
                     vga_text_9x16_set_palette_entry(index, red, green, blue);
                 }
                 command_step = 0;
@@ -1478,7 +1654,7 @@ class SecondSight {
             } else if (command_step == 2) {
                 // DMA complete, we're done.
                 uint8_t color = cmd_buffer[1];
-                host_text_border = color;
+                host_text_border = color; // palette index: window bezel + Host Text blank
                 command_step = 0;
                 reg_handshake = 0x00;
             }
@@ -1706,6 +1882,25 @@ class SecondSight {
             cmd_table_hosttext[0x43] = &SecondSight::cmd_reject;
             cmd_table_hosttext[0x50] = &SecondSight::cmd_set_text_ctrl;
 
+            cmd_table_gputext[0] = &SecondSight::cmd_get_status;
+            cmd_table_gputext[1] = &SecondSight::cmd_set_mode;
+            cmd_table_gputext[4] = &SecondSight::cmd_screen_off;
+            cmd_table_gputext[5] = &SecondSight::cmd_screen_on;
+            cmd_table_gputext[6] = &SecondSight::cmd_set_palette;
+            cmd_table_gputext[7] = &SecondSight::cmd_set_palette_entry;
+            cmd_table_gputext[8] = &SecondSight::cmd_set_border;
+            cmd_table_gputext[0x0F] = &SecondSight::cmd_set_text_font;
+            for (int i = 2; i < 16; i++) {
+                if (cmd_table_gputext[i] == nullptr) {
+                    cmd_table_gputext[i] = &SecondSight::cmd_reject;
+                }
+            }
+            cmd_table_gputext[0x40] = &SecondSight::cmd_reject;
+            cmd_table_gputext[0x41] = &SecondSight::cmd_reject;
+            cmd_table_gputext[0x42] = &SecondSight::cmd_reject;
+            cmd_table_gputext[0x43] = &SecondSight::cmd_reject;
+            cmd_table_gputext[0x50] = &SecondSight::cmd_reject;
+
             cmd_table = cmd_table_emu;
         }
 
@@ -1775,9 +1970,31 @@ class SecondSight {
             }
         }
 
+        bool handshake_in_flight() const {
+            return dma_address != nullptr
+                || handshake_hold_reads != 0
+                || longrun_reads != 0;
+        }
+
         uint8_t read_handshake() {
             process_handshake_hold();
             command_longrun_status();
+
+            if (ss_mode == SS_MODE_GPUTEXT && !handshake_in_flight()) {
+                if ((reg_handshake == 0xA5 || reg_handshake == 0xA6)
+                    && !gputext_hs_terminal_consumed) {
+                    gputext_hs_terminal_consumed = true;
+                    return reg_handshake;
+                }
+                /* Hosttext-style WaitHSOff wants one $00 after DMA. Idle GPU
+                 * Text $C0B8 is ring-empty $01 — without this latch, SetTextFont
+                 * (no longrun) spins forever on CMP $C0B8. */
+                if (reg_handshake == 0x00 && !gputext_hs_off_consumed) {
+                    gputext_hs_off_consumed = true;
+                    return 0x00;
+                }
+                return gpu_text.ring_empty() ? 0x01 : 0x00;
+            }
 
             return reg_handshake;
         }
@@ -1790,6 +2007,8 @@ class SecondSight {
                 return;
             }
 
+            gputext_hs_terminal_consumed = false;
+            gputext_hs_off_consumed = false;
             clear_handshake_timers();
             active_command = value;
             cmd_buffer[0] = value;
@@ -1801,6 +2020,7 @@ class SecondSight {
 
         // send additional data related to the command
         void write_data(uint8_t address, uint8_t value) {
+            (void)address;
             if (dma_direction == DMA_DIRECTION_OUT) {
                 return;
             }
@@ -1817,6 +2037,12 @@ class SecondSight {
                         execute_command();
                     }
                 }
+                return;
+            }
+            if (ss_mode == SS_MODE_GPUTEXT && gpu_text.is_active()) {
+                gputext_hs_off_consumed = true;
+                gpu_text.push_byte(value);
+                apply_gpu_text_yield("c0b1");
             }
         }
 
@@ -1847,6 +2073,9 @@ class SecondSight {
 
 
         bool frame() {
+            if (ss_mode == SS_MODE_GPUTEXT) {
+                return frame_gpu_text();
+            }
             if (ss_mode == SS_MODE_HOSTTEXT) {
                 return frame_host_text();
             }
@@ -1873,50 +2102,31 @@ class SecondSight {
             if (!display_enabled) {
                 return true; // we control frame, but have nothing to draw.
             }
+            uint8_t br = 0, bg = 0, bb = 0;
+            resolve_ss_bezel(&br, &bg, &bb);
             if (ss_mode == SS_MODE_GPU) {
                 if (gpu.take_vbl_complete()) {
                     reg_handshake = 0xA5;
                     command_step = 0;
                 }
-                return gpu.frame_to_window();
+                return gpu.frame_to_window(br, bg, bb);
             }
             if (ss_mode == SS_MODE_PPU) {
                 return frame_ppu();
             }
             const uint8_t *display_base = frame_buffer + screen_base_addr;
 
-            // Preserve the VGA source aspect ratio when letterboxing into the
-            // emulator target so Second Sight text/graphics aren't stretched to
-            // fill the full 1288x928 target. The text rasterizer computes its own
-            // equivalent fit; here we do the same for the 8/16/24bpp framebuffer
-            // paths (which otherwise pass dstadj=nullptr and stretch).
-            SDL_FRect fit_dst = { 0.0f, 0.0f, 0.0f, 0.0f };
-            SDL_FRect *fit_dst_ptr = nullptr;
-            if (vs->target.w > 0.0f && vs->target.h > 0.0f) {
-                const float src_w = (float)(is_text_mode()
-                    ? (VGA_TEXT_COLS * VGA_TEXT_CELL_W) : current_vga_mode.width);
-                const float src_h = (float)(is_text_mode()
-                    ? VGA_TEXT_SCREEN_H : current_vga_mode.height);
-                const float fitted_h = vs->target.w * src_h / src_w;
-                if (fitted_h < vs->target.h) {
-                    const float margin_y = (vs->target.h - fitted_h) * 0.5f;
-                    const float source_margin_y = margin_y * src_h / vs->target.h;
-                    fit_dst = { 0.0f, source_margin_y, 0.0f, source_margin_y };
-                    fit_dst_ptr = &fit_dst;
-                }
-            }
-
             if (is_text_mode()) {
                 render_vga_text_frame();
             } else if (current_vga_mode.color_depth == 8) {
                 vga_render_8bpp(vs, tex_24bpp, rgb24_buffer, palette_rgb, display_base, fb_pitch,
-                    current_vga_mode.width, current_vga_mode.height, fit_dst_ptr);
+                    current_vga_mode.width, current_vga_mode.height, br, bg, bb);
             } else if (current_vga_mode.color_depth == 16) {
                 vga_render_16bpp(vs, tex_16bpp, display_base, fb_pitch,
-                    current_vga_mode.width, current_vga_mode.height, fit_dst_ptr);
+                    current_vga_mode.width, current_vga_mode.height, br, bg, bb);
             } else if (current_vga_mode.color_depth == 24) {
                 vga_render_24bpp(vs, tex_24bpp, display_base, fb_pitch,
-                    current_vga_mode.width, current_vga_mode.height, fit_dst_ptr);
+                    current_vga_mode.width, current_vga_mode.height, br, bg, bb);
             }
             return true;
         }
@@ -2026,6 +2236,11 @@ class SecondSight {
 
         void debug(DebugFormatter *df) {
             df->addLine("VGA Active: %d", vga_active);
+            {
+                uint8_t br = 0, bg = 0, bb = 0;
+                resolve_ss_bezel(&br, &bg, &bb);
+                df->addLine("SetBorder: %02X  bezel RGB %02X%02X%02X", host_text_border, br, bg, bb);
+            }
             df->addLine("Display Mode: %s (%d)", ss_mode_label(ss_mode), (int)ss_mode);
             df->addLine("VGA Mode Num: %02X", vga_mode_num);
             {
@@ -2051,6 +2266,21 @@ class SecondSight {
             df->addLine("CRT Addr Scale: %u bytes/unit", crtc_bytes_per_address_unit());
             df->addLine("FB Pitch: %d", fb_pitch);
             df->addLine("Res X/Y @ Depth: %d/%d @ %d", res_x, res_y, current_vga_mode.color_depth);
+            if (ss_mode == SS_MODE_GPUTEXT) {
+                const ss_host_text_raster_t &r = gpu_text.raster();
+                df->addLine("GPUText: raster=%02X %ux%u %ux%u sync=%s yield=%d ring=%d extra=%d half=%d",
+                    r.mode, r.cols, r.vis_rows, r.cell_w, r.cell_h,
+                    gpu_text.sync_immediate() ? "imm" : "vbl",
+                    gpu_text.yielded() ? 1 : 0,
+                    gpu_text.queued_words(),
+                    gpu_text.pending_extra() ? 1 : 0,
+                    gpu_text.half_word_pending() ? 1 : 0);
+                df->addLine("  cursor=%u,%u style=%04X attr=%02X margins LRTB=%u,%u,%u,%u",
+                    gpu_text.cursor_x(), gpu_text.cursor_y(),
+                    gpu_text.cursor_style(), gpu_text.current_attr(),
+                    gpu_text.margin_left(), gpu_text.margin_right(),
+                    gpu_text.margin_top(), gpu_text.margin_bottom());
+            }
             if (ss_mode == SS_MODE_HOSTTEXT) {
                 df->addLine("HostText: %s ctrl=%04X aux=%d raster=%02X %ux%u %ux%u",
                     host_text_armed ? "armed" : "unarmed",
