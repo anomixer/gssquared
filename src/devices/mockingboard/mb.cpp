@@ -630,7 +630,9 @@ void generate_mockingboard_frame(mb_cpu_data *mb_d) {
     // Send the generated audio data to the SDL audio stream
     int abs = mb_d->audio_buffer.size();
     if (abs > 0) {
-        //printf("generate_mockingboard_frame: %zu\n", mb_d->audio_buffer.size());
+        if (mb_d->stream && SDL_GetAudioStreamQueued(mb_d->stream) > 8820 * (int)sizeof(float)) {
+            SDL_ClearAudioStream(mb_d->stream);
+        }
         SDL_PutAudioStreamData(mb_d->stream, mb_d->audio_buffer.data(), mb_d->audio_buffer.size() * sizeof(float));
     }
     mb_d->audio_buffer.clear();

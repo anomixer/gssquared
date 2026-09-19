@@ -70,7 +70,8 @@
         "list": "cpp",
         "map": "cpp",
         "set": "cpp",
-        "unordered_set": "cpp"
+        "unordered_set": "cpp",
+        "*.h": "cpp"
     },
     "makefile.configureOnOpen": false,
     "todo-tree.tree.scanMode": "workspace",

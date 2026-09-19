@@ -10,6 +10,9 @@
 #include "util/SystemSettings.hpp"
 #include "devices/game/gamecontroller.hpp"
 #include "Module_ID.hpp"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 static void pushMenuEvent(Sint32 code) {
 	SDL_Event event = {};
@@ -42,7 +45,12 @@ void MenuInterface::diskToggle(storage_key_t key) {
 	SDL_Event event = {};
 	event.type = gs2_app_values.menu_event_type;
 	event.user.code = MENU_DISK_TOGGLE;
-	event.user.data1 = (void*)(uintptr_t)key.key;
+	// Do not cast storage_key_t::key directly to a pointer. On wasm32 the
+	// high 32 bits (including the slot) are truncated, so File -> Drives sends
+	// the wrong storage key while the in-emulator drive drawer still works.
+	const uintptr_t packed = (static_cast<uintptr_t>(key.slot) << 16)
+	                       | static_cast<uintptr_t>(key.drive);
+	event.user.data1 = reinterpret_cast<void*>(packed);
 	SDL_PushEvent(&event);
 }
 
@@ -85,6 +93,48 @@ void MenuInterface::toggleDisconnectedWhenNoGamepad() {
 
 void MenuInterface::toggleSsTextMode() {
 	SystemSettings::instance().toggle_ss_text_mode();
+	syncSsTextCanvasAspect();
+}
+
+void MenuInterface::syncSsTextCanvasAspect() {
+	const bool on = SystemSettings::instance().ss_text_mode();
+#ifdef __EMSCRIPTEN__
+	// SS mode keeps the emulator canvas at 1288x928. The native 720x400 VGA
+	// image is fitted inside that surface by the renderer; explicitly setting
+	// both dimensions avoids a large viewport stretching only one axis.
+	EM_ASM({
+		var c = document.querySelector('#canvas');
+		if (!c) { return; }
+		if ($0) {
+			c.style.aspectRatio = '1288 / 928';
+			window.gssquaredSsTextMode = true;
+			if (window.gssquaredResizeSsCanvas) window.gssquaredResizeSsCanvas();
+		} else {
+			window.gssquaredSsTextMode = false;
+			c.style.aspectRatio = '1288 / 928';
+			c.style.removeProperty('width');
+			c.style.removeProperty('height');
+			c.style.removeProperty('max-width');
+			c.style.removeProperty('max-height');
+		}
+		// Force layout and let SDL re-measure the new CSS size.
+		var _forceReflow = c.offsetWidth;
+		window.dispatchEvent(new Event('resize'));
+		setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 16);
+		setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 50);
+		setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 100);
+		setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 200);
+	}, on ? 1 : 0);
+
+	video_system_t *vs = computer_ ? computer_->video_system : nullptr;
+	if (vs) {
+		// Keep the SS canvas at the normal 1288x928 emulator surface. The
+		// 720x400 source is fitted inside it by SecondSight::frame().
+		vs->set_target_aspect(0.0f);
+	}
+#else
+	(void)on;
+#endif
 }
 
 int MenuInterface::getCurrentSpeed() {

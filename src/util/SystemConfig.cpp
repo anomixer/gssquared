@@ -786,6 +786,15 @@ bool SystemConfig::finalize_load(std::string& error_out) {
 }
 
 bool SystemConfig::load_gs2(const std::string& path, std::string& error_out) {
+    std::error_code ec;
+    if (path.empty() || !std::filesystem::exists(path, ec) || !std::filesystem::is_regular_file(path, ec)) {
+        if (fallback_to_settings(path, error_out)) {
+            return true;
+        }
+        error_out = "File not found: " + path;
+        return false;
+    }
+
     toml::table table;
     try {
         table = toml::parse_file(path);
@@ -1102,6 +1111,10 @@ void SystemConfig::dump(std::ostream& out) const {
 namespace {
 
 std::string peek_gs2_id(const std::string& path) {
+    std::error_code ec;
+    if (path.empty() || !std::filesystem::exists(path, ec) || !std::filesystem::is_regular_file(path, ec)) {
+        return {};
+    }
     try {
         const toml::table table = toml::parse_file(path);
         if (const auto id = table["id"].value<std::string>()) {
@@ -1252,7 +1265,8 @@ std::string SystemConfig::find_user_config_path_for_id(const std::string& id) {
 }
 
 bool SystemConfig::try_import_bram_from_gs2(const std::string& path) {
-    if (path.empty() || bram_) {
+    std::error_code ec;
+    if (path.empty() || bram_ || !std::filesystem::exists(path, ec) || !std::filesystem::is_regular_file(path, ec)) {
         return false;
     }
     try {

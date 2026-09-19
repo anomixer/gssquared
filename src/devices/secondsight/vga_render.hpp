@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <SDL3/SDL.h>
+
 struct video_system_t;
 struct SDL_Texture;
 

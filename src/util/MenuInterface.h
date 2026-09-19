@@ -49,6 +49,9 @@ public:
 	void toggleHudDrives();
 	void toggleDisconnectedWhenNoGamepad();
 	void toggleSsTextMode();
+	// Switch the web canvas (and video target aspect) to the Second Sight VGA text
+	// resolution when that mode is active, restoring it otherwise.
+	void syncSsTextCanvasAspect();
 	void displayFullScreen();
 	void editCopyScreen();
 	void editPasteText();

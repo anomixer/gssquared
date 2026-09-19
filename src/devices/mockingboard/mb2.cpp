@@ -234,7 +234,9 @@ public:
         // Send the generated audio data to the SDL audio stream
         int abs = audio_buffer.size();
         if (abs > 0) {
-            //printf("generate_mockingboard_frame: %zu\n", mb_d->audio_buffer.size());
+            if (stream && SDL_GetAudioStreamQueued(stream) > 8820 * (int)sizeof(float)) {
+                SDL_ClearAudioStream(stream);
+            }
             SDL_PutAudioStreamData(stream, audio_buffer.data(), audio_buffer.size() * sizeof(float));
         }
         audio_buffer.clear();

@@ -158,7 +158,8 @@ static void build_menu_bar()
             ImGui::Separator();
             if (ImGui::MenuItem("Close Emulation")) {
                 SDL_Event ev = {};
-                ev.type = SDL_EVENT_QUIT;
+                ev.type = gs2_app_values.menu_event_type;
+                ev.user.code = MENU_FILE_CLOSE_EMULATION;
                 SDL_PushEvent(&ev);
             }
             ImGui::Separator();
@@ -441,9 +442,6 @@ bool menuNeedsFrame()
 void renderMenuOverlay(SDL_Renderer *renderer, int /*win_w*/, int /*win_h*/)
 {
     if (!g_imgui_inited) return;
-
-    if (emulated_mouse_captured())
-        return;
 
     // Manage mouse grab: release while ImGui wants the mouse, restore when done.
     {

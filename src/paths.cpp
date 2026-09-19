@@ -143,8 +143,8 @@ const std::string& get_pref_path(void) {
     }
 
 #if defined(__EMSCRIPTEN__)
-    // MEMFS root; not persisted across reloads (could mount IDBFS later).
-    pref_path = "/";
+    // IDBFS mount point; persisted across browser reloads via IndexedDB.
+    pref_path = "/persistent/";
 #else
     pref_path = SDL_GetPrefPath("jawaidbazyar2", "GSSquared");
 #endif

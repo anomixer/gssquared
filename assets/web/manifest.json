@@ -1,0 +1,16 @@
+{
+  "name": "GSSquared Apple II / IIgs Emulator",
+  "short_name": "GSSquared",
+  "description": "High-performance WebAssembly Apple II & IIgs emulator",
+  "start_url": "./GSSquared.html",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "icons": [
+    {
+      "src": "img/gssquared-mark.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}

@@ -23,6 +23,8 @@ endif()
 # Set the project name
 project(gssquared)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 ################################################################################
 #### VERSION MANAGEMENT
 ################################################################################
@@ -256,8 +258,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # pthreads binary against objects built without them. Set this before any
 # targets (including the vendored SDL subdirectories) are created.
 if(EMSCRIPTEN)
-    add_compile_options(-pthread)
-    add_link_options(-pthread)
+    add_compile_options(-pthread -fexceptions)
+    add_link_options(-pthread -fexceptions)
 endif()
 
 configure_sdl_builds()
@@ -1335,9 +1337,22 @@ if(EMSCRIPTEN)
         -sSTACK_SIZE=4mb
         -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS,stringToNewUTF8,UTF8ToString
         -sFORCE_FILESYSTEM=1
+        -lidbfs.js
         --preload-file ${GS2_WEB_PRELOAD}
         --shell-file ${CMAKE_SOURCE_DIR}/assets/web/shell.html
     )
+    # Emscripten consumes the shell during the final link, but CMake does not
+    # infer that --shell-file is an input dependency. Track it explicitly so
+    # edits to assets/web/shell.html regenerate GSSquared.html.
+    set_property(TARGET GSSquared APPEND PROPERTY
+        LINK_DEPENDS ${CMAKE_SOURCE_DIR}/assets/web/shell.html)
+
+    # WebAssembly SIMD optimization option
+    option(GS2_WASM_SIMD "Enable WebAssembly SIMD optimizations" OFF)
+    if(GS2_WASM_SIMD)
+        target_compile_options(GSSquared PRIVATE -msimd128)
+        target_link_options(GSSquared PRIVATE -msimd128)
+    endif()
 
     # Optional: keep symbol names + runtime assertions for debugging the web
     # build (readable JS/wasm stack traces, clearer FS/abort messages).
@@ -1348,6 +1363,23 @@ if(EMSCRIPTEN)
 
     # Emit GSSquared.html (+ .js/.wasm/.data) instead of a bare executable.
     set_target_properties(GSSquared PROPERTIES SUFFIX ".html")
+
+    # Copy web shell support assets to the deploy root.
+    add_custom_command(TARGET GSSquared POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/img
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/img/gssquared-mark.png
+            ${CMAKE_BINARY_DIR}/img/gssquared-mark.png
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/web/manifest.json
+            ${CMAKE_BINARY_DIR}/manifest.json
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/web/sw.js
+            ${CMAKE_BINARY_DIR}/sw.js
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/assets/web/coi-serviceworker.js
+            ${CMAKE_BINARY_DIR}/coi-serviceworker.js
+    )
 
     # The preload step must run after resources are assembled.
     add_dependencies(GSSquared assemble_resources)

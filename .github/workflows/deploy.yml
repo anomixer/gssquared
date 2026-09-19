@@ -1,0 +1,81 @@
+name: Deploy GSSquared to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache Emscripten SDK
+        id: cache-emsdk
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/emsdk
+          key: emsdk-3.1.73-${{ runner.os }}
+
+      - name: Setup Emscripten SDK
+        run: |
+          if [ ! -d "$HOME/emsdk/.git" ]; then
+            rm -rf $HOME/emsdk
+            git clone --depth 1 https://github.com/emscripten-core/emsdk.git $HOME/emsdk
+            cd $HOME/emsdk
+            ./emsdk install 3.1.73
+            ./emsdk activate 3.1.73
+          else
+            cd $HOME/emsdk
+            ./emsdk activate 3.1.73
+          fi
+          echo "$HOME/emsdk" >> $GITHUB_PATH
+          echo "$HOME/emsdk/upstream/emscripten" >> $GITHUB_PATH
+          echo "EMSDK=$HOME/emsdk" >> $GITHUB_ENV
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure CMake for WebAssembly
+        run: |
+          emcmake cmake -B build-web -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGS2_WASM_SIMD=ON
+
+      - name: Build WebAssembly Target
+        run: |
+          cmake --build build-web --target GSSquared -j 4
+
+      - name: Copy index.html for root access
+        run: |
+          cp build-web/GSSquared.html build-web/index.html
+
+      - name: Upload GitHub Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build-web
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -82,10 +82,15 @@ struct video_system_t {
     int border_width = BORDER_WIDTH;
     int border_height = BORDER_HEIGHT;
     float aspect_ratio = 0.0;
+    // When > 0, overrides the default display target aspect (used to switch the
+    // canvas to the Second Sight VGA text resolution so text fills non-letterbox).
+    float forced_target_aspect = 0.0f;
     /* float scale_x = 2.0f;
     float scale_y = 4.0f; */
     int window_width = 0;
     int window_height = 0;
+    int last_render_w = 0;
+    int last_render_h = 0;
 
     EventQueue *event_queue = nullptr;
 
@@ -108,9 +113,6 @@ struct video_system_t {
 
 protected:
     void calculate_target_rect(int new_w, int new_h);
-    // Recompute the target rect from the renderer's real pixel output size
-    // (not window points), so the emulator image is sized for the high-DPI backbuffer.
-    void update_target_from_output();
     // Create the CRT fragment shader and its GPU render state. No-op (returns
     // false) when the GPU renderer is not in use. Safe to call once at init.
     bool init_crt_shader();
@@ -124,6 +126,16 @@ protected:
 public:
     video_system_t(computer_t *computer);
     ~video_system_t();
+
+    // Recompute the target rect from the renderer's real pixel output size
+    // (not window points), so the emulator image is sized for the high-DPI backbuffer.
+    void update_target_from_output();
+
+    // Override the display target aspect (0 = use the platform default). Used to
+    // switch the canvas to the Second Sight VGA text resolution while that mode is
+    // active, then restore it afterwards.
+    void set_target_aspect(float aspect);
+
     void set_window_title(const char *title);
     void window_resize(const SDL_Event &event);
     void toggle_fullscreen();

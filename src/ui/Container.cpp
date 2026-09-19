@@ -170,28 +170,13 @@ bool Container_t::handle_mouse_event(const SDL_Event& event) {
         bool is_inside = (mouse_x >= eb.x && mouse_x <= eb.x + eb.w &&
                           mouse_y >= eb.y && mouse_y <= eb.y + eb.h);
 
-        if (is_inside) {
-            for (size_t i = 0; i < tiles.size(); i++) {
-                if (tiles[i] && tiles[i]->is_visible()) {
-                    bool consumed = tiles[i]->handle_mouse_event(event);
-                    if (consumed && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) return true;// break;
-                }
+        for (size_t i = 0; i < tiles.size(); i++) {
+            if (tiles[i] && tiles[i]->is_visible()) {
+                bool consumed = tiles[i]->handle_mouse_event(event);
+                if (consumed && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) return true;
             }
-            return false; //true;  // mouse is inside this container; claim the event from siblings
-        } else {
-            // TODO: does this have no effect?
-            // mouse is outside — clear any lingering hover states on children
-            /* for (size_t i = 0; i < tiles.size(); i++) {
-                if (tiles[i] && tiles[i]->is_visible() && tiles[i]->is_mouse_hovering()) {
-                    SDL_Event fake_motion = event;
-                    fake_motion.type = SDL_EVENT_MOUSE_MOTION;
-                    fake_motion.motion.x = mouse_x;
-                    fake_motion.motion.y = mouse_y;
-                    tiles[i]->handle_mouse_event(fake_motion);
-                }
-            } */
-            return false;
         }
+        return is_inside;
     }
     else if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
         is_hovering = false;
