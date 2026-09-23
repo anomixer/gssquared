@@ -94,8 +94,8 @@ EditSystem::EditSystem(video_system_t *vs, AssetAtlas_t *aa)
     title_renderer = new TextRenderer(vs->renderer, "fonts/OpenSans-Regular.ttf", 24.0f);
     ui_ctx = {vs->renderer, vs->window, text_renderer, title_renderer, aa};
 
-    design_width = vs->window_width > 0 ? vs->window_width : 1288;
-    design_height = vs->window_height > 0 ? vs->window_height : 928;
+    design_width = 1288;
+    design_height = 928;
 
     apply_logical_presentation();
 
@@ -676,12 +676,13 @@ bool EditSystem::update() {
 }
 
 void EditSystem::apply_logical_presentation() {
-    SDL_SetRenderLogicalPresentation(vs->renderer, design_width, design_height,
-                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+    ensure_logical_presentation();
 }
 
 void EditSystem::render() {
     if (!updated) return;
+
+    ensure_logical_presentation();
 
     platform_info *plat = get_platform(draft.config().platform_id);
     uint32_t case_color = plat ? (plat->case_color & 0xFFFFFF00) | 0xE0 : 0x808080E0;
@@ -736,7 +737,20 @@ void EditSystem::render() {
     updated = false;
 }
 
+void EditSystem::ensure_logical_presentation() {
+#ifdef __EMSCRIPTEN__
+    // On WASM, always sync with actual canvas size before setting logical presentation.
+    // This ensures LETTERBOX is computed from correct canvas dimensions, preventing
+    // clipping during overlay display, after close emulation, or any state transition.
+    vs->update_target_from_output();
+#endif
+    SDL_SetRenderLogicalPresentation(vs->renderer, design_width, design_height,
+                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+}
+
 bool EditSystem::event(const SDL_Event &event) {
+    ensure_logical_presentation();
+
     if (event.type == SDL_EVENT_QUIT) {
         result = EDIT_QUIT;
         return true;
@@ -745,12 +759,49 @@ bool EditSystem::event(const SDL_Event &event) {
     if (event.type == SDL_EVENT_WINDOW_RESIZED ||
         event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
         event.type == SDL_EVENT_WINDOW_EXPOSED) {
+        last_presentation_w = 0;
+        last_presentation_h = 0;
+        ensure_logical_presentation();
         updated = true;
         return false;
     }
 
     SDL_Event ev = event;
+#ifdef __EMSCRIPTEN__
+    // WASM: invert the LETTERBOX logical presentation ourselves. SDL's
+    // SDL_ConvertEventToRenderCoordinates mishandles the mapping on the
+    // Emscripten canvas (DPR / internal dst rect), shifting hit-testing. Invert
+    // the letterbox in window *points* (the space mouse events arrive in), which
+    // is DPR-independent and exact.
+    int win_w = 0, win_h = 0;
+    SDL_GetWindowSize(vs->window, &win_w, &win_h);
+    if (win_w > 0 && win_h > 0) {
+        const float ar = static_cast<float>(design_width) / static_cast<float>(design_height);
+        float tw, th, tx, ty;
+        if (static_cast<float>(win_w) / static_cast<float>(win_h) > ar) {
+            th = static_cast<float>(win_h);
+            tw = th * ar;
+            tx = (static_cast<float>(win_w) - tw) * 0.5f;
+            ty = 0.0f;
+        } else {
+            tw = static_cast<float>(win_w);
+            th = tw / ar;
+            tx = 0.0f;
+            ty = (static_cast<float>(win_h) - th) * 0.5f;
+        }
+        const float sx = static_cast<float>(design_width)  / tw;
+        const float sy = static_cast<float>(design_height) / th;
+        if (ev.type == SDL_EVENT_MOUSE_MOTION) {
+            ev.motion.x = (ev.motion.x - tx) * sx;
+            ev.motion.y = (ev.motion.y - ty) * sy;
+        } else if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            ev.button.x = (ev.button.x - tx) * sx;
+            ev.button.y = (ev.button.y - ty) * sy;
+        }
+    }
+#else
     SDL_ConvertEventToRenderCoordinates(vs->renderer, &ev);
+#endif
 
     if (card_picker) {
         if (card_picker->handle_mouse_event(ev)) {

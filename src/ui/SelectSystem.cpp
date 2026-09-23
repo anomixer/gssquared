@@ -54,8 +54,8 @@ SelectSystem::SelectSystem(video_system_t *vs, AssetAtlas_t *aa)
     // aspect ratio is always preserved and all content stays on-screen no matter
     // how big the window/canvas is (important on the web, where the canvas
     // drawable size doesn't necessarily match the window size at startup).
-    design_width = vs->window_width  > 0 ? vs->window_width  : 1288;
-    design_height = vs->window_height > 0 ? vs->window_height : 928;
+    design_width = 1288;
+    design_height = 928;
     window_width = design_width;
     window_height = design_height;
     // Leave room under the tile grid for a small action bar, then the footer hint.
@@ -178,12 +178,12 @@ SelectSystem::SelectSystem(video_system_t *vs, AssetAtlas_t *aa)
     SDL_FRect tile_bounds = container->get_effective_bounds();
     float action_x = (design_width - action_w) / 2.0f;
     float action_y = tile_bounds.y + tile_bounds.h + 16.0f;
-    if (action_y + action_h > ui_ctx.description_y - 12.0f) {
-        action_y = ui_ctx.description_y - 12.0f - action_h;
-    }
     action_con_->size(action_w, action_h);
     action_con_->set_position(action_x, action_y);
     action_con_->layout();
+
+    ui_ctx.description_x = design_width / 2.0f;
+    ui_ctx.description_y = action_y + action_h + 14.0f;
 
     updated = true;
 }
@@ -196,33 +196,72 @@ SelectSystem::~SelectSystem() {
 }
 
 void SelectSystem::apply_logical_presentation() {
+    ensure_logical_presentation();
+}
+
+void SelectSystem::ensure_logical_presentation() {
+#ifdef __EMSCRIPTEN__
+    vs->update_target_from_output();
+#endif
     SDL_SetRenderLogicalPresentation(vs->renderer, design_width, design_height,
                                      SDL_LOGICAL_PRESENTATION_LETTERBOX);
 }
 
 bool SelectSystem::event(const SDL_Event &event) {
+    ensure_logical_presentation();
+
     if (event.type == SDL_EVENT_QUIT) {
         selected_system = SELECT_QUIT;
         return true;
     }
 
-    // The window/canvas was resized (or the browser changed the canvas
-    // drawable size). Our layout is in fixed design coordinates, so nothing
-    // needs to move, but we must repaint: the renderer only redraws on
-    // updated==true, and on the web a resize blanks the WebGL backing buffer.
     if (event.type == SDL_EVENT_WINDOW_RESIZED ||
         event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
         event.type == SDL_EVENT_WINDOW_EXPOSED) {
+        last_presentation_w = 0;
+        last_presentation_h = 0;
+        ensure_logical_presentation();
         updated = true;
         return false;
     }
 
-    // Mouse coordinates arrive in window space; convert them into the renderer's
-    // logical (design) space so hit-testing matches what we draw. The renderer's
-    // LETTERBOX logical presentation is left active for the selector's lifetime
-    // (see constructor), so the conversion uses the same mapping as rendering.
     SDL_Event ev = event;
+#ifdef __EMSCRIPTEN__
+    // WASM: invert the LETTERBOX logical presentation ourselves. SDL's
+    // SDL_ConvertEventToRenderCoordinates mishandles the mapping on the
+    // Emscripten canvas (DPR / internal dst rect), which shifted hit-testing so
+    // only the upper part of the UI responded. SDL maps the 1288x928 design
+    // space into the window letterboxed by aspect; doing that inverse in window
+    // *points* (the space mouse events arrive in) is DPR-independent and exact.
+    int win_w = 0, win_h = 0;
+    SDL_GetWindowSize(vs->window, &win_w, &win_h);
+    if (win_w > 0 && win_h > 0) {
+        const float ar = static_cast<float>(design_width) / static_cast<float>(design_height);
+        float tw, th, tx, ty;
+        if (static_cast<float>(win_w) / static_cast<float>(win_h) > ar) {
+            th = static_cast<float>(win_h);
+            tw = th * ar;
+            tx = (static_cast<float>(win_w) - tw) * 0.5f;
+            ty = 0.0f;
+        } else {
+            tw = static_cast<float>(win_w);
+            th = tw / ar;
+            tx = 0.0f;
+            ty = (static_cast<float>(win_h) - th) * 0.5f;
+        }
+        const float sx = static_cast<float>(design_width)  / tw;
+        const float sy = static_cast<float>(design_height) / th;
+        if (ev.type == SDL_EVENT_MOUSE_MOTION) {
+            ev.motion.x = (ev.motion.x - tx) * sx;
+            ev.motion.y = (ev.motion.y - ty) * sy;
+        } else if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            ev.button.x = (ev.button.x - tx) * sx;
+            ev.button.y = (ev.button.y - ty) * sy;
+        }
+    }
+#else
     SDL_ConvertEventToRenderCoordinates(vs->renderer, &ev);
+#endif
 
     if (action_con_) {
         action_con_->handle_mouse_event(ev);
@@ -258,9 +297,7 @@ bool SelectSystem::update() {
 
 void SelectSystem::render() {
     if (updated) {
-        // The LETTERBOX logical presentation is already active (set in the
-        // constructor). Draw everything in design coordinates; SDL maps it onto
-        // the real output and fills the letterbox bars with black at present().
+        ensure_logical_presentation();
         container->render();
         if (action_con_) {
             action_con_->render();
@@ -280,6 +317,12 @@ void SelectSystem::render() {
             hint = "Open an existing config file to edit";
         }
         if (hint) {
+            const int line_h = text_renderer->get_font_line_height();
+            const int text_w = text_renderer->string_width(hint);
+            ui_ctx.fill_rect({ui_ctx.description_x - text_w / 2.0f - 8.0f,
+                              ui_ctx.description_y - 4.0f,
+                              static_cast<float>(text_w + 16),
+                              static_cast<float>(line_h + 8)}, 0x000000FF);
             text_renderer->set_color(0xFF, 0xFF, 0xFF, 0xFF);
             text_renderer->render(hint,
                                   static_cast<int>(ui_ctx.description_x),

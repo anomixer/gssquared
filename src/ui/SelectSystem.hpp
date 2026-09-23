@@ -30,8 +30,13 @@ protected:
     int window_width, window_height;
     int design_width = 1288;
     int design_height = 928;
+    int last_presentation_w = 0;
+    int last_presentation_h = 0;
+    bool presentation_active = false;
     AssetAtlas_t *aa;
     UIContext ui_ctx;
+
+    void ensure_logical_presentation();
 
     /** Owned loaded configs for recent tiles (keeps SystemConfig_t string pointers valid). */
     std::vector<std::unique_ptr<SystemConfig>> recent_loaded_;

@@ -1,0 +1,10 @@
+CompileFlags:
+  CompilationDatabase: build
+  Add:
+    - -Isrc
+    - -Isrc/util
+    - -Ivendored/SDL/include
+    - -Ivendored/SDL_image/include
+    - -Ivendored/SDL_ttf/include
+    - -Ibuild/generated
+    - -std=c++17

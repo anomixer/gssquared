@@ -18,14 +18,17 @@
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "macos-clang-arm64",
-            "configurationProvider": "ms-vscode.cmake-tools"
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json"
         },
         {
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
                 "${workspaceFolder}/src",
+                "${workspaceFolder}/src/util",
                 "${workspaceFolder}/vendored/SDL/include",
+                "${workspaceFolder}/vendored/SDL_image/include",
+                "${workspaceFolder}/vendored/SDL_ttf/include",
                 "${workspaceFolder}/build/generated",
                 "C:/msys64/mingw64/include",
                 "C:/msys64/mingw64/x86_64-w64-mingw32/include"
@@ -40,7 +43,7 @@
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "windows-clang-x64",
-            "configurationProvider": "ms-vscode.cmake-tools"
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json"
         }
     ],
     "version": 4

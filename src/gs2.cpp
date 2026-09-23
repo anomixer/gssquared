@@ -42,6 +42,7 @@
 #include "util/SystemSettings.hpp"
 #include "ui/OSD.hpp"
 #if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
 #include "platform-specific/emscripten/web_file_dialog.hpp"
 #include <emscripten.h>
 #elif defined(__APPLE__)
@@ -108,13 +109,34 @@
 /** Globals we haven't dealt properly with yet. */
 OSD *osd = nullptr;
 
+
+static void clear_selector_output_black(video_system_t *vs) {
+    // LETTERBOX only clears the logical destination.  On Emscripten the
+    // remaining physical canvas area can retain the browser/SDL default
+    // (white), so clear the complete output while presentation is disabled.
+    SDL_SetRenderLogicalPresentation(vs->renderer, 0, 0,
+                                     SDL_LOGICAL_PRESENTATION_DISABLED);
+    SDL_SetRenderViewport(vs->renderer, nullptr);
+    SDL_SetRenderClipRect(vs->renderer, nullptr);
+    SDL_SetRenderScale(vs->renderer, 1.0f, 1.0f);
+    SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
+    SDL_RenderClear(vs->renderer);
+    SDL_SetRenderLogicalPresentation(vs->renderer, 1288, 928,
+                                     SDL_LOGICAL_PRESENTATION_LETTERBOX);
+}
+
 // Defined in OSD.cpp — used here where osd is accessible for menu-triggered disk toggle
 void handle_disk_toggle(computer_t *computer, OSD *osd, storage_key_t key);
 
 void handle_single_event(computer_t *computer, cpu_state *cpu, SDL_Event &event) {
     // Handle disk toggle from menu directly here where osd is accessible
     if (event.type == gs2_app_values.menu_event_type && event.user.code == MENU_DISK_TOGGLE) {
-        storage_key_t key((uint64_t)(uintptr_t)event.user.data1);
+        const uintptr_t packed = reinterpret_cast<uintptr_t>(event.user.data1);
+        storage_key_t key;
+        key.partition = 0;
+        key.subunit = 0;
+        key.drive = static_cast<uint16_t>(packed & 0xffffu);
+        key.slot = static_cast<uint16_t>((packed >> 16) & 0xffffu);
         handle_disk_toggle(computer, osd, key);
         return;
     }
@@ -181,6 +203,15 @@ void frame_appevent(computer_t *computer, cpu_state *cpu) {
                 break; */
             case EVENT_SHOW_MESSAGE:
                 osd->set_heads_up_message((const char *)event->getEventData(), 512);
+#ifdef __EMSCRIPTEN__
+                // Keep the web shell's centered status indicator in sync with
+                // mount/media messages that normally appear only in the OSD.
+                EM_ASM({
+                    if (window.gssquaredSetStatus) {
+                        window.gssquaredSetStatus(UTF8ToString($0));
+                    }
+                }, (const char *)event->getEventData());
+#endif
                 break;
          
         }
@@ -392,6 +423,18 @@ bool run_one_frame(computer_t *computer) {
     }
 
     if (computer->execution_mode == EXEC_PAUSED) {
+#ifdef __EMSCRIPTEN__
+        // The browser's requestAnimationFrame loop is paced by SDL's present
+        // path. If paused frames return without presenting, no RAF callback is
+        // scheduled and the page appears completely frozen, including the
+        // menu item that would resume emulation. Keep presenting the unchanged
+        // frame while doing no CPU/device emulation work.
+        frame_video_update(computer, false);
+#else
+        // Native builds do not use the browser's RAF/vsync pump, but avoid a
+        // tight loop while paused.
+        SDL_Delay(16);
+#endif
         return true;
     }
 
@@ -753,6 +796,42 @@ struct GS2AppState {
     MMU_IIgs *mmu_iigs = nullptr;
 };
 
+#if defined(__EMSCRIPTEN__)
+static GS2AppState *g_web_app_state = nullptr;
+
+extern "C" EMSCRIPTEN_KEEPALIVE void gssquared_enter_control_panel() {
+    if (!g_web_app_state || g_web_app_state->phase != PHASE_EMULATION
+        || !g_web_app_state->computer) {
+        return;
+    }
+
+    // The IIgs built-in Control Panel is entered by Ctrl+OpenApple+Esc.
+    // Queue the same SDL key sequence as a physical keyboard so the ADB
+    // keyboard microcontroller sees the real modifier transitions.
+    const auto push_key = [](Uint32 type, SDL_Keycode key, SDL_Scancode scancode,
+                             SDL_Keymod mod) {
+        SDL_Event event = {};
+        event.type = type;
+        event.key.key = key;
+        event.key.scancode = scancode;
+        event.key.mod = mod;
+        event.key.repeat = false;
+        SDL_PushEvent(&event);
+    };
+
+    SDL_RaiseWindow(g_web_app_state->computer->video_system->window);
+    push_key(SDL_EVENT_KEY_DOWN, SDLK_LCTRL, SDL_SCANCODE_LCTRL, SDL_KMOD_CTRL);
+    push_key(SDL_EVENT_KEY_DOWN, SDLK_LALT, SDL_SCANCODE_LALT,
+             SDL_KMOD_CTRL | SDL_KMOD_LALT);
+    push_key(SDL_EVENT_KEY_DOWN, SDLK_ESCAPE, SDL_SCANCODE_ESCAPE,
+             SDL_KMOD_CTRL | SDL_KMOD_LALT);
+    push_key(SDL_EVENT_KEY_UP, SDLK_ESCAPE, SDL_SCANCODE_ESCAPE,
+             SDL_KMOD_CTRL | SDL_KMOD_LALT);
+    push_key(SDL_EVENT_KEY_UP, SDLK_LALT, SDL_SCANCODE_LALT, SDL_KMOD_CTRL);
+    push_key(SDL_EVENT_KEY_UP, SDLK_LCTRL, SDL_SCANCODE_LCTRL, SDL_KMOD_NONE);
+}
+#endif
+
 void transition_to_emulation(GS2AppState *state, const SystemConfig_t *system_config, int builtin_system_id);
 
 static bool apply_system_config_file(GS2AppState *state, const std::string& path, std::string& error_out) {
@@ -849,6 +928,28 @@ static void leave_edit_system(GS2AppState *state) {
     state->select_system = new SelectSystem(vs, state->aa);
     state->phase = PHASE_SYSTEM_SELECT;
 }
+
+#if defined(__EMSCRIPTEN__)
+// Recreating the SDL renderer does not necessarily change #viewport's CSS
+// size, so ResizeObserver will not notify Emscripten. Explicitly ask SDL's web
+// backend to resample the canvas after Close Emulation creates the new window.
+static void notify_web_canvas_resize() {
+    EM_ASM({
+        window.dispatchEvent(new Event('resize'));
+        setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 16);
+        setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 100);
+        setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 200);
+    });
+}
+
+static void prepare_web_canvas_for_restart() {
+    EM_ASM({
+        if (window.gssquaredPrepareCanvasForRestart) {
+            window.gssquaredPrepareCanvasForRestart();
+        }
+    });
+}
+#endif
 
 static void system_config_dialog_callback(void *userdata, const char *const *filelist, int /*filter*/) {
     auto *data = static_cast<open_config_dialog_data_t *>(userdata);
@@ -1330,6 +1431,12 @@ void transition_to_emulation(GS2AppState *state, const SystemConfig_t *system_co
     if (gs2_app_values.crt_shader_at_boot) {
         vs->set_crt_shader_enabled(true, true);
     }
+#ifdef __EMSCRIPTEN__
+    // If Second Sight Text was already enabled (e.g. from saved config), sync the
+    // canvas resolution now so the text isn't stretched on first entry. The toggle
+    // path alone would otherwise require an off/on cycle to take effect.
+    getMenuInterface()->syncSsTextCanvasAspect();
+#endif
     state->phase = PHASE_EMULATION;
 }
 
@@ -1338,6 +1445,12 @@ void transition_to_emulation(GS2AppState *state, const SystemConfig_t *system_co
  */
 void transition_to_shutdown(GS2AppState *state) {
     computer_t *computer = state->computer;
+
+#if defined(__EMSCRIPTEN__)
+    // Detach the old canvas DOM listeners before SDL destroys its window.
+    // Otherwise a delayed pointer event can call into freed SDL window data.
+    prepare_web_canvas_for_restart();
+#endif
 
     // save cpu trace buffer, then exit.
     // TODO: move this to the trace buffer destructor.
@@ -1390,6 +1503,23 @@ void transition_to_shutdown(GS2AppState *state) {
 
     state->select_system = new SelectSystem(vs, state->aa);
 
+#if defined(__EMSCRIPTEN__)
+    // Returning to the selector: restore the default canvas aspect (the Second Sight
+    // text resolution may have been applied while emulation was running).
+    EM_ASM({
+        var c = document.querySelector('#canvas');
+        if (c) {
+            c.style.aspectRatio = '1288 / 928';
+            c.style.removeProperty('width');
+            c.style.removeProperty('height');
+            c.style.removeProperty('max-width');
+            c.style.removeProperty('max-height');
+            var _forceReflow = c.offsetWidth;
+        }
+    });
+    notify_web_canvas_resize();
+#endif
+
     // Let vsync throttle the selection UI instead of spinning.
     // On the web, RAF does that (gs2_web_lock_raf in SDL_AppIterate).
     // SDL_SetRenderVSync(1) here would arm SDL's 60 Hz software fallback.
@@ -1419,6 +1549,9 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
     SDL_SetHint(SDL_HINT_MAC_SCROLL_MOMENTUM, "1");
 
     GS2AppState *state = new GS2AppState();
+#if defined(__EMSCRIPTEN__)
+    g_web_app_state = state;
+#endif
     
     int platform_id = PLATFORM_APPLE_II_PLUS;  // default to Apple II Plus
     bool platform_explicit = false;            // true when -p was given on CLI
@@ -1635,8 +1768,66 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
     GS2AppState *state = (GS2AppState *)appstate;
 
-    // Let the platform menu consume the event first (Linux hamburger/right-click)
-    if (handleMenuEvent(event)) return SDL_APP_CONTINUE;
+    // Let the platform menu consume the event first (Linux hamburger/right-click).
+    // In PHASE_SYSTEM_SELECT and PHASE_EDIT_SYSTEM, ImGui's menu bar may set
+    // WantCaptureMouse=true, silently swallowing SDL_EVENT_MOUSE_MOTION events
+    // before they reach SelectSystem/EditSystem. That breaks hover detection and
+    // the hint text footer. We therefore do NOT return early on mouse events when
+    // in those phases — instead we let them fall through to select_system->event().
+    const bool menu_consumed = handleMenuEvent(event);
+    if (menu_consumed) {
+        const bool is_hover_event = (event->type == SDL_EVENT_MOUSE_MOTION ||
+                                     event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+                                     event->type == SDL_EVENT_MOUSE_BUTTON_UP);
+        const bool in_selector = (state->phase == PHASE_SYSTEM_SELECT && state->select_system) ||
+                                  (state->phase == PHASE_EDIT_SYSTEM  && state->edit_system);
+        if (!is_hover_event || !in_selector) {
+            return SDL_APP_CONTINUE;
+        }
+        // Fall through: let the selector/editor handle the mouse event for hover.
+    }
+
+    // Resizing the Emscripten canvas can recreate/clear the renderer's output
+    // surface.  The selector/editor normally redraw only when their model is
+    // dirty, so explicitly invalidate the current UI or the ImGui menu overlay
+    // can disappear until another input event causes a redraw.
+    if (event->type == SDL_EVENT_WINDOW_RESIZED
+        || event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+        if (state->phase == PHASE_SYSTEM_SELECT && state->select_system) {
+            state->select_system->mark_dirty();
+        } else if (state->phase == PHASE_EDIT_SYSTEM && state->edit_system) {
+            state->edit_system->mark_dirty();
+        }
+    }
+
+    if (event->type == gs2_app_values.menu_event_type
+        && event->user.code == MENU_FILE_CLOSE_EMULATION) {
+        if (state->phase == PHASE_EMULATION) {
+            state->auto_launched = false;
+            if (state->computer && state->computer->video_system) {
+                state->computer->video_system->display_capture_mouse(false);
+            }
+            transition_to_shutdown(state);
+        }
+        return SDL_APP_CONTINUE;
+    }
+
+#ifdef __EMSCRIPTEN__
+    // SDL_APP_SUCCESS maps to Emscripten exit(), which leaves the page black
+    // and reports "Exception thrown" instead of giving the web user a chance
+    // to confirm. Let the shell own the browser-tab close confirmation.
+    if (event->type == SDL_EVENT_QUIT) {
+        if (state->computer && state->computer->video_system) {
+            state->computer->video_system->display_capture_mouse(false);
+        }
+        EM_ASM({
+            if (window.gssquaredConfirmQuit) {
+                window.gssquaredConfirmQuit();
+            }
+        });
+        return SDL_APP_CONTINUE;
+    }
+#endif
 
     if (event->type == gs2_app_values.menu_event_type) {
         BlankDiskType blank_type;
@@ -1679,10 +1870,11 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 
         handle_single_event(computer, cpu, *event);
 
-        // handled in computer now
-        /* if (event->type == SDL_EVENT_QUIT) {
-            cpu->halt = HLT_USER;
-        } */
+        if (event->type == SDL_EVENT_QUIT) {
+            if (cpu) {
+                cpu->halt = HLT_USER;
+            }
+        }
         return SDL_APP_CONTINUE;
     }
 
@@ -1751,8 +1943,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             state->select_system->mark_dirty();
         }
         if (state->select_system->update()) {
-            SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
-            vs->clear();
+            clear_selector_output_black(vs);
             state->select_system->render();
             render_menu_overlay_for_ui_phase(vs);
             vs->present();
@@ -1812,8 +2003,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
             state->edit_system->mark_dirty();
         }
         if (state->edit_system->update()) {
-            SDL_SetRenderDrawColor(vs->renderer, 0, 0, 0, 255);
-            vs->clear();
+            clear_selector_output_black(vs);
             state->edit_system->render();
             render_menu_overlay_for_ui_phase(vs);
             vs->present();
@@ -1839,6 +2029,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
         osd->update();
 
         if (!run_one_frame(computer)) {
+#ifdef __EMSCRIPTEN__
+            state->auto_launched = false;
+            transition_to_shutdown(state);
+            return SDL_APP_CONTINUE;
+#else
             // Finder Open of another .gs2 while emulating: tear down and
             // boot the pending config. Must not take the auto_launched exit
             // path — that would quit the process before the switch.
@@ -1867,6 +2062,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                 return SDL_APP_SUCCESS;
             }
             transition_to_shutdown(state);
+#endif
         }
         return SDL_APP_CONTINUE;
     }

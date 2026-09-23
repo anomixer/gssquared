@@ -31,30 +31,52 @@ video_system_t::video_system_t(computer_t *computer) {
     display_fullscreen_mode = DISPLAY_WINDOWED_MODE;
     event_queue = computer->event_queue;
 
+#ifndef __EMSCRIPTEN__
     // TODO: calculate an initial window size that will get us an integral scale starting out.
     window_width = (BASE_WIDTH + border_width*2) * SCALE_X;
     window_height = (BASE_HEIGHT + border_height*2) * SCALE_Y;
     aspect_ratio = (float)window_width / (float)window_height;
+#endif
 
+#ifdef __EMSCRIPTEN__
+    // On WASM, let the canvas adapt to its container size rather than forcing
+    // a specific dimension. The HTML/CSS defines the canvas container layout,
+    // and SDL will query the actual canvas size at runtime. Pass 0, 0 to let
+    // SDL read the canvas size from the HTML element, preventing forced window
+    // sizing that conflicts with browser layout.
+    window = SDL_CreateWindow(
+        "GSSquared - Apple ][ Emulator",
+        0, 0,  // Let SDL query canvas element size from HTML/CSS
+        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    );
+#else
     window = SDL_CreateWindow(
         "GSSquared - Apple ][ Emulator", 
         (BASE_WIDTH + border_width*2) * SCALE_X, 
         (BASE_HEIGHT + border_height*2) * SCALE_Y, 
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
     );
+#endif
 
     if (!window) {
         fprintf(stderr, "Window could not be created! SDL_Error: %s\n", SDL_GetError());
     }
 
-    // Set minimum and maximum window sizes to maintain reasonable dimensions
-    SDL_SetWindowMinimumSize(window, window_width / 2, window_height / 2);  // Half size
-    //SDL_SetWindowMaximumSize(window, window_width * 2, window_height * 2);  // 4x size
-    
-    // Set the window's aspect ratio to match the Apple II display (560:384).
-    // Not on the web: the "window" is the <canvas>, whose size the page stylesheet
-    // owns, and SDL enforces this by writing the canvas CSS size itself.
-#if !defined(__EMSCRIPTEN__)
+#ifdef __EMSCRIPTEN__
+    // On WASM, read the actual canvas size AFTER window creation.
+    // aspect_ratio must be based on DESIGN resolution (1288x928 for SelectSystem/EditSystem)
+    // so calculate_target_rect properly letterboxes any canvas size.
+    int actual_w = 0, actual_h = 0;
+    SDL_GetWindowSize(window, &actual_w, &actual_h);
+    window_width = actual_w;
+    window_height = actual_h;
+    // Fixed selector/emulator design aspect ratio. This must not be derived
+    // from the current canvas: the canvas is the destination, not the design.
+    aspect_ratio = 1288.0f / 928.0f;
+#else
+    // Set minimum window size to maintain reasonable dimensions.
+    // Native platforms enforce aspect ratio; on WASM the stylesheet owns layout.
+    SDL_SetWindowMinimumSize(window, window_width / 2, window_height / 2);
     SDL_SetWindowAspectRatio(window, aspect_ratio, aspect_ratio);
 #endif
 
@@ -205,7 +227,15 @@ video_system_t::~video_system_t() {
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
     if (clip) delete clip;
+    // The web selector reuses the same canvas when Close Emulation returns to
+    // the machine selector.  SDL's Emscripten event callbacks can still be
+    // delivering a pointer event while the old window is being torn down.
+    // Shutting down all of SDL here makes that callback observe freed window
+    // data (and can turn the canvas selector into `0`).  Keep SDL alive for
+    // the in-page transition; the process/page teardown will shut it down.
+#ifndef __EMSCRIPTEN__
     SDL_Quit();
+#endif
 }
 
 // Fragment-shader uniform block for the CRT effect (matches the shader's
@@ -292,6 +322,12 @@ void video_system_t::set_window_title(const char *title) {
 
 void video_system_t::render_frame(SDL_Texture *texture, SDL_FRect *srcrect, SDL_FRect *dstadj, bool respect_mode,
         const SDL_FRect *content_inset_src) {
+
+    int cur_w = 0, cur_h = 0;
+    SDL_GetCurrentRenderOutputSize(renderer, &cur_w, &cur_h);
+    if (cur_w > 0 && cur_h > 0 && (cur_w != last_render_w || cur_h != last_render_h)) {
+        update_target_from_output();
+    }
 
     SDL_FRect adj_target;
     if (dstadj) {
@@ -386,36 +422,65 @@ void video_system_t::show(SDL_Window *window) {
 
 /* Given new window width and height, calculate the target rectangle for the display. */
 void video_system_t::calculate_target_rect(int new_w, int new_h) {
-    float new_aspect = (float)new_w / new_h;
+    if (new_w <= 0 || new_h <= 0) {
+        target = { 0.0f, 0.0f, 0.0f, 0.0f };
+        return;
+    }
+    // A positive override (e.g. the Second Sight VGA text resolution) takes
+    // precedence over the platform default so the display switches resolution.
+    float target_aspect;
+    if (forced_target_aspect > 0.0f) {
+        target_aspect = forced_target_aspect;
+    } else {
+#ifdef __EMSCRIPTEN__
+        // Keep this independent from SDL window initialization timing. During a
+        // browser state transition SDL can briefly report a new output size, but
+        // the logical design aspect remains fixed.
+        target_aspect = 1288.0f / 928.0f;
+#else
+        target_aspect = aspect_ratio;
+#endif
+    }
+    float new_aspect = (float)new_w / (float)new_h;
     constexpr float aspect_epsilon = 0.001f;
-    if (std::fabs(new_aspect - aspect_ratio) <= aspect_epsilon) {
+    if (std::fabs(new_aspect - target_aspect) <= aspect_epsilon) {
         printf("aspect match ");   
         // how accurate will a float be here?
         target.w = new_w;
         target.h = new_h;
         target.x = 0.0f;
         target.y = 0.0f;
-    } else if (new_aspect > aspect_ratio) { 
+    } else if (new_aspect > target_aspect) {
         printf("aspect wide ");
         // wider than our aspect ratio.
         target.h = new_h;
-        target.w = (float) new_h * aspect_ratio;        
+        target.w = (float) new_h * target_aspect;
         target.y = 0.0f;
         target.x = ((float)new_w - target.w) / 2.0f;
     } else {
         // narrower than our aspect ratio.
         printf("aspect tall ");
         target.w = new_w;
-        target.h = (float) new_w / aspect_ratio;
+        target.h = (float) new_w / target_aspect;
         target.x = 0.0f;
         target.y = ((float)new_h - target.h) / 2.0f;
     }
     printf("calculate_target_rect: (%f, %f) [%f x %f] @ %f\n", target.x, target.y, target.w, target.h, (float)target.w/target.h);
 }
 
+void video_system_t::set_target_aspect(float aspect) {
+    forced_target_aspect = aspect;
+    // Recompute the target rect for the (possibly new) canvas size; a later canvas
+    // resize will call this again with the final pixel dimensions.
+    update_target_from_output();
+}
+
 void video_system_t::update_target_from_output() {
     int pixel_w = 0, pixel_h = 0;
     SDL_GetCurrentRenderOutputSize(renderer, &pixel_w, &pixel_h);
+    printf("[videosystem] update_target_from_output: render output is %dx%d pixels\n", pixel_w, pixel_h);
+    last_render_w = pixel_w;
+    last_render_h = pixel_h;
     calculate_target_rect(pixel_w, pixel_h);
     ensure_scene_target(pixel_w, pixel_h);
 }
@@ -489,6 +554,24 @@ void video_system_t::toggle_fullscreen() {
 bool video_system_t::display_capture_mouse(bool capture) {
     printf("display_capture_mouse: %d\n", capture);
     mouse_captured = capture;
+#ifdef __EMSCRIPTEN__
+    // SDL's Emscripten backend requests pointer lock immediately, but a menu
+    // command is often processed after the browser's click gesture has ended.
+    // Keep a JS-side pending request so the shell can retry on the next canvas
+    // click, which is a valid browser user gesture.
+    EM_ASM({
+        var want = $0 !== 0;
+        window.gssquaredPointerLockPending = want;
+        if (!want && document.pointerLockElement) {
+            document.exitPointerLock();
+        } else if (want && Module.canvas && document.pointerLockElement !== Module.canvas) {
+            try {
+                var request = Module.canvas.requestPointerLock();
+                if (request && request.catch) request.catch(function () {});
+            } catch (e) {}
+        }
+    }, capture ? 1 : 0);
+#endif
     if (!SDL_SetWindowRelativeMouseMode(window, capture)) {
         printf("SDL_SetWindowRelativeMouseMode failed: %s\n", SDL_GetError());
     }
@@ -505,7 +588,12 @@ bool video_system_t::display_capture_mouse_message(bool capture) {
     bool oldstate = mouse_captured;
     bool result = display_capture_mouse(capture);
     if (!oldstate) {
+#ifdef __EMSCRIPTEN__
+        event_queue->addEvent(new Event(EVENT_SHOW_MESSAGE, 0,
+            "Click the emulator to capture mouse; release with F1"));
+#else
         event_queue->addEvent(new Event(EVENT_SHOW_MESSAGE, 0, "Mouse Captured, release with F1"));
+#endif
     }
     return true;
 }

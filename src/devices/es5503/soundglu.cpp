@@ -85,6 +85,16 @@ static void ensoniq_flush_sdl_staging(ensoniq_state_t *st) {
     // which is an audible dropout. Prefill on (re)start, then trim the resample
     // ratio ±0.5% to hold the target depth.
     const int target_bytes = (int)(dst_rate * ch * sizeof(int16_t) * 60 / 1000);
+
+    // Discard stale audio backlog if queue overflows (e.g. while WebAudio was suspended
+    // or browser thread lagged), eliminating 15-20 second audio latency delays.
+    if (queued_now > target_bytes * 3) {
+        SDL_ClearAudioStream(st->stream);
+        st->resample_pos = 0.0;
+        st->sdl_staging_count = 0;
+        return;
+    }
+
     if (queued_now == 0) {
         uint32_t pre = dst_rate / 20;  // 50ms of silence (frames)
         if (pre > ensoniq_state_t::SDL_STAGING_CAP) pre = ensoniq_state_t::SDL_STAGING_CAP;

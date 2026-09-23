@@ -43,6 +43,10 @@ protected:
     bool updated = true;
     int design_width = 1288;
     int design_height = 928;
+    int last_presentation_w = 0;
+    int last_presentation_h = 0;
+    bool presentation_active = false;
+    void ensure_logical_presentation();
     /** Offset applied to all content except the window title (centers the content block). */
     float layout_dx = 0.0f;
     float layout_dy = 0.0f;

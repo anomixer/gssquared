@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <SDL3/SDL_rect.h>
 #include "vga_render_text_9x16.hpp"
 
 struct video_system_t;

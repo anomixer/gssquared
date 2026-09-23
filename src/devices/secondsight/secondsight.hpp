@@ -2171,6 +2171,7 @@ class SecondSight {
                 return frame_ppu();
             }
             const uint8_t *display_base = frame_buffer + screen_base_addr;
+
             if (is_text_mode()) {
                 render_vga_text_frame();
             } else if (current_vga_mode.color_depth == 8) {
