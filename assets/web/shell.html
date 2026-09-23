@@ -580,19 +580,12 @@
         if (text === '' && !runtimeReady) {
           runtimeReady = true;
           if (overlaySpinner) overlaySpinner.style.display = 'none';
-          if (overlayHint) overlayHint.textContent = 'Click to start';
           requestAnimationFrame(function () {
             requestAnimationFrame(function () {
               window.dispatchEvent(new Event('resize'));
+              startEmulator();
             });
           });
-          // Auto-start / dismiss overlay after 5 seconds if not clicked.
-          if (autoStartTimer) clearTimeout(autoStartTimer);
-          autoStartTimer = setTimeout(function() {
-            if (overlayElement && overlayElement.style.display !== 'none') {
-              startEmulator();
-            }
-          }, 5000);
         }
       },
       totalDependencies: 0,
