@@ -1,8 +1,8 @@
 # System Config TOML (`.gs2`)
 
-Proposed on-disk format for user-created system configurations. Maps to `SystemConfig_t` in `src/systemconfig.hpp`, slot device IDs in `src/Device_ID.hpp` / `src/devices.cpp`, and initial disk mounts handled by `Mounts::mount_media()` in `src/util/mount.cpp`.
+Implemented on-disk schema for user-created system configurations. Maps to `SystemConfig_t` in `src/systemconfig.hpp`, slot device IDs in `src/Device_ID.hpp` / `src/devices.cpp`, and initial disk mounts handled by `Mounts::mount_media()` in `src/util/mount.cpp`.
 
-This is a **design proposal** — not yet implemented.
+This is the **schema reference** for the live `.gs2` format. For a how-to, start with [Writing Config Files Manually](ConfigFiles.md) and [Creating Custom System Configs](ConfigEditor.md). The visual editor and File → Launch Config… load and save this format.
 
 ## File identity
 
@@ -328,7 +328,7 @@ Aligned with `src/serial_devices/`:
 | `"clipboard"` | Capture to host clipboard (high-bit stripped; CR/LF/CRLF → one LF; idle-close like file) |
 | `"echo"` | Loopback for testing (schema only; not offered in UI) |
 | `"modem"` | Hayes-compatible virtual modem (native builds; serial ports only) |
-| `"serial"` | Real host UART; `path` is the OS port name (macOS `/dev/cu.*`, Windows `COMn`, Linux `/dev/ttyUSB*`) |
+| `"serial"` | Real host UART; `path` is the OS port name (macOS `/dev/cu.*`, Windows `COMn`, Linux `/dev/ttyS*` `/dev/ttyUSB*` `/dev/ttyACM*` `/dev/ttyAMA*`) |
 
 **Allowed devices by port kind:** serial (SCC, SSC) → none / file / clipboard / modem / serial; parallel → none / file / clipboard.
 

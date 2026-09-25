@@ -51,6 +51,10 @@ enum MenuEventCode {
 	MENU_CONTROLLER_JOYPORT_CENTER,
 	MENU_CONTROLLER_JOYPORT_RIGHT,
 
+	MENU_APPLE_KEYS_COMMAND = 710,
+	MENU_APPLE_KEYS_ALT,
+	MENU_APPLE_KEYS_LEFT_OPTION,
+
 };
 
 typedef SDL_AppResult (*MenuIterateCallback)(void *appstate);
@@ -68,6 +72,9 @@ bool handleMenuEvent(const SDL_Event *event);
 // display dest; passing NULL uses the full window. SelectSystem / EditSystem
 // must leave `menuBarHeight()` of design-space room under that strip.
 void renderMenuOverlay(SDL_Renderer *renderer, const SDL_FRect *content);
+// One ImGui menu frame, no draw. The web build uses this from the DOM click
+// handler so File → Drives can open a picker before Safari's user gesture ends.
+void advanceMenuFrameForGesture(SDL_Renderer *renderer, const SDL_FRect *content);
 void pumpMenuEvents();
 /** True when ImGui is capturing input (menu bar hover / open menu) and needs another frame. */
 bool menuNeedsFrame();

@@ -15,6 +15,28 @@
 
 static constexpr float MENU_FONT_SIZE = 20.0f;
 
+// Dropdown inset. The bar window forces WindowPadding to zero, and that style
+// is still on the stack when a popup opens, so each menu pushes its own.
+// Top stays flush with the bar; left, right, and bottom get room.
+static constexpr float kMenuPadX      = 16.0f;
+static constexpr float kMenuPadBottom = 10.0f;
+
+static bool begin_menu(const char *label, bool enabled = true)
+{
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(kMenuPadX, 0.0f));
+    const bool open = ImGui::BeginMenu(label, enabled);
+    if (!open)
+        ImGui::PopStyleVar();
+    return open;
+}
+
+static void end_menu()
+{
+    ImGui::Dummy(ImVec2(0.0f, kMenuPadBottom));
+    ImGui::EndMenu();
+    ImGui::PopStyleVar();
+}
+
 // ── Module state ──────────────────────────────────────────────────────────────
 
 static SDL_Window   *g_window        = nullptr;
@@ -104,7 +126,7 @@ static void render_drives_menu()
 
 static void render_new_disk_image_menu(MenuInterface *mi)
 {
-    if (ImGui::BeginMenu("New Disk Image")) {
+    if (begin_menu("New Disk Image")) {
         if (ImGui::MenuItem("5.25 Unformatted"))
             mi->newDiskImage(MENU_FILE_NEW_DISK_525_UNFMT);
         if (ImGui::MenuItem("5.25 Formatted DOS 3.3"))
@@ -117,7 +139,7 @@ static void render_new_disk_image_menu(MenuInterface *mi)
             mi->newDiskImage(MENU_FILE_NEW_DISK_32M_HD);
         if (ImGui::MenuItem("32M HD Formatted ProDOS"))
             mi->newDiskImage(MENU_FILE_NEW_DISK_32M_PRODOS);
-        ImGui::EndMenu();
+        end_menu();
     }
 }
 
@@ -127,7 +149,7 @@ static void build_menu_bar()
     bool           running = mi->isEmulationRunning();
 
     // ── File ─────────────────────────────────────────────────────────────────
-    if (ImGui::BeginMenu("File")) {
+    if (begin_menu("File")) {
         if (!running) {
             if (ImGui::MenuItem("Launch Config...")) {
                 mi->openSystemConfig();
@@ -141,9 +163,9 @@ static void build_menu_bar()
             }
         } else {
             render_new_disk_image_menu(mi);
-            if (ImGui::BeginMenu("Drives")) {
+            if (begin_menu("Drives")) {
                 render_drives_menu();
-                ImGui::EndMenu();
+                end_menu();
             }
             {
                 bool drivers_on = mi->getMountDrivers();
@@ -172,18 +194,18 @@ static void build_menu_bar()
                 SDL_PushEvent(&ev);
             }
         }
-        ImGui::EndMenu();
+        end_menu();
     }
 
     // ── Edit ─────────────────────────────────────────────────────────────────
-    if (ImGui::BeginMenu("Edit")) {
+    if (begin_menu("Edit")) {
         if (ImGui::MenuItem("Copy Screen"))  mi->editCopyScreen();
         if (ImGui::MenuItem("Paste Text"))   mi->editPasteText();
-        ImGui::EndMenu();
+        end_menu();
     }
 
     // ── Machine ───────────────────────────────────────────────────────────────
-    if (ImGui::BeginMenu("Machine")) {
+    if (begin_menu("Machine")) {
         if (!running) ImGui::BeginDisabled();
         if (ImGui::MenuItem("Reset"))         mi->machineReset();
         if (ImGui::MenuItem("Restart"))       mi->machineRestart();
@@ -191,16 +213,16 @@ static void build_menu_bar()
         ImGui::Separator();
         if (ImGui::MenuItem("Capture Mouse")) mi->machineCaptureMouse();
         if (!running) ImGui::EndDisabled();
-        ImGui::EndMenu();
+        end_menu();
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
-    if (ImGui::BeginMenu("Settings")) {
+    if (begin_menu("Settings")) {
         if (!running) ImGui::BeginDisabled();
 
         // Speed submenu
         int cur_speed = running ? mi->getCurrentSpeed() : 0;
-        if (ImGui::BeginMenu("Speed")) {
+        if (begin_menu("Speed")) {
             struct { const char *label; int id; } speeds[] = {
                 { "1.0 MHz",  SPEED_1_0  },
                 { "2.8 MHz",  SPEED_2_8  },
@@ -212,12 +234,12 @@ static void build_menu_bar()
                 if (ImGui::MenuItem(s.label, nullptr, checked))
                     mi->setSpeed(s.id);
             }
-            ImGui::EndMenu();
+            end_menu();
         }
 
         // Game Controller submenu
         int cur_ctrl = running ? mi->getCurrentControllerMode() : -1;
-        if (ImGui::BeginMenu("Game Controller")) {
+        if (begin_menu("Game Controller")) {
             struct { const char *label; int mode; } controllers[] = {
                 { "Joystick - Gamepad",     0 },
                 { "Joystick - Mouse",       1 },
@@ -230,7 +252,7 @@ static void build_menu_bar()
             }
             ImGui::Separator();
             bool joyport_on = (cur_ctrl == 2);
-            if (ImGui::BeginMenu("Joyport Controller Select", joyport_on)) {
+            if (begin_menu("Joyport Controller Select", joyport_on)) {
                 int cur_sel = mi->getJoyportSelect();
                 struct { const char *label; int select; } selects[] = {
                     { "Left",   0 },
@@ -242,16 +264,33 @@ static void build_menu_bar()
                     if (ImGui::MenuItem(s.label, nullptr, checked))
                         mi->setJoyportSelect(s.select);
                 }
-                ImGui::EndMenu();
+                end_menu();
             }
             ImGui::Separator();
             bool absent_disconnected = mi->getDisconnectedWhenNoGamepad();
             if (ImGui::MenuItem("Disconnected When No Gamepad", nullptr, absent_disconnected))
                 mi->toggleDisconnectedWhenNoGamepad();
-            ImGui::EndMenu();
+            end_menu();
         }
 
         if (!running) ImGui::EndDisabled();
+
+        ImGui::Separator();
+
+        if (begin_menu("Apple Keys")) {
+            int cur = mi->getAppleKeyLayout();
+            struct { const char *label; int layout; } layouts[] = {
+                { "Command = Open Apple",     0 },
+                { "Alt = Open Apple",         1 },
+                { "Left Option = Open Apple", 2 },
+            };
+            for (auto &layout : layouts) {
+                bool checked = (cur == layout.layout);
+                if (ImGui::MenuItem(layout.label, nullptr, checked))
+                    mi->setAppleKeyLayout(layout.layout);
+            }
+            end_menu();
+        }
 
         ImGui::Separator();
 
@@ -269,15 +308,15 @@ static void build_menu_bar()
         if (ImGui::MenuItem("Right Mouse Button Accelerate", nullptr, rmb_accel))
             mi->toggleRightMouseAccel();
 
-        ImGui::EndMenu();
+        end_menu();
     }
 
     // ── Display ───────────────────────────────────────────────────────────────
-    if (ImGui::BeginMenu("Display")) {
+    if (begin_menu("Display")) {
         if (!running) ImGui::BeginDisabled();
 
         int cur_mon = running ? mi->getCurrentMonitor() : -1;
-        if (ImGui::BeginMenu("Monitor")) {
+        if (begin_menu("Monitor")) {
             struct { const char *label; int id; } monitors[] = {
                 { "Composite",          MONITOR_COMPOSITE  },
                 { "GS RGB",             MONITOR_GS_RGB     },
@@ -290,17 +329,17 @@ static void build_menu_bar()
                 if (ImGui::MenuItem(m.label, nullptr, checked))
                     mi->setMonitor(m.id);
             }
-            ImGui::EndMenu();
+            end_menu();
         }
 
-        if (ImGui::BeginMenu("HUD")) {
+        if (begin_menu("HUD")) {
             bool stats_on = mi->getHudStats();
             if (ImGui::MenuItem("Stats", nullptr, stats_on))
                 mi->toggleHudStats();
             bool drives_on = mi->getHudDrives();
             if (ImGui::MenuItem("Drives", nullptr, drives_on))
                 mi->toggleHudDrives();
-            ImGui::EndMenu();
+            end_menu();
         }
 
         if (ImGui::MenuItem("Full Screen"))
@@ -325,18 +364,18 @@ static void build_menu_bar()
         }
 
         if (!running) ImGui::EndDisabled();
-        ImGui::EndMenu();
+        end_menu();
     }
 
     // ── Docs ──────────────────────────────────────────────────────────────────
-    if (ImGui::BeginMenu("Docs")) {
+    if (begin_menu("Docs")) {
         if (ImGui::MenuItem("Check For Updates"))
             openCheckForUpdates();
         if (ImGui::MenuItem("Online Documentation"))
             SDL_OpenURL("https://jawaidbazyar2.github.io/gssquared/");
         if (ImGui::MenuItem("Donate"))
             SDL_OpenURL("https://gssquared.net/support");
-        ImGui::EndMenu();
+        end_menu();
     }
 }
 
@@ -444,9 +483,19 @@ bool menuNeedsFrame()
     return io.WantCaptureMouse || io.WantCaptureKeyboard;
 }
 
-void renderMenuOverlay(SDL_Renderer *renderer, const SDL_FRect *content)
+static bool g_menu_frame_open = false;
+
+static void render_menu_overlay_impl(SDL_Renderer *renderer, const SDL_FRect *content, bool draw)
 {
     if (!g_imgui_inited) return;
+
+    if (emulated_mouse_captured())
+        return;
+
+    // A DOM click can re-enter while NewFrame is still building the bar
+    // (the file input's own click). Don't start a second ImGui frame.
+    if (g_menu_frame_open)
+        return;
 
     // Manage mouse grab: release while ImGui wants the mouse, restore when done.
     {
@@ -458,6 +507,7 @@ void renderMenuOverlay(SDL_Renderer *renderer, const SDL_FRect *content)
         }
     }
 
+    g_menu_frame_open = true;
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
@@ -501,7 +551,19 @@ void renderMenuOverlay(SDL_Renderer *renderer, const SDL_FRect *content)
     ImGui::PopStyleVar(4);
 
     ImGui::Render();
-    ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+    g_menu_frame_open = false;
+    if (draw && renderer)
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+}
+
+void renderMenuOverlay(SDL_Renderer *renderer, const SDL_FRect *content)
+{
+    render_menu_overlay_impl(renderer, content, true);
+}
+
+void advanceMenuFrameForGesture(SDL_Renderer *renderer, const SDL_FRect *content)
+{
+    render_menu_overlay_impl(renderer, content, false);
 }
 
 #endif // __linux__ || __EMSCRIPTEN__
