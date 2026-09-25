@@ -777,6 +777,8 @@ if(NOT EMSCRIPTEN)
 
     add_subdirectory(apps/cycletest)
 
+    add_subdirectory(apps/uartbaudtest)
+
     #add_subdirectory(apps/dpp)
     add_subdirectory(apps/vpp)
 
