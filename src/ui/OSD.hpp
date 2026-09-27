@@ -204,6 +204,8 @@ public:
     void set_raise_window();
 
     void open_file_dialog(storage_key_t key);
+    /** Host file picker. In a pack session this does not copy the file into the pack. */
+    void open_local_file_dialog(storage_key_t key);
     void open_host_fst_folder_dialog();
     void refresh_host_fst_button();
 
@@ -215,6 +217,11 @@ public:
 
     /** Prompt to stop the current machine and launch a config. No-op if a modal is already up. */
     void prompt_launch_config(const std::string &path, std::function<void()> on_confirm);
+
+    UIContext& ui_context() { return ui_ctx; }
+    void push_modal(ModalContainer_t *modal);
+    /** Pop `modal` if it is the top of the stack. Does not delete it. */
+    void take_modal(ModalContainer_t *modal);
 
     void set_heads_up_message(const std::string &text, int count);
 

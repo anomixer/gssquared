@@ -321,7 +321,7 @@ Use `c.quit()` / protocol `QUIT` in harnesses — avoid SIGKILL without `--no-qu
 | `web.audio-gesture` | Audio after user gesture | Complete | web | — | Click to start overlay | manual | Browser policy |
 | `web.deploy-live` | gssquared.net/live deploy | Complete | web | Server | `/live` loads | manual | `scripts/deploy-web.sh` |
 
-Future catalog/play: [arqyv-gs2pack.md](arqyv-gs2pack.md) (planned product shape).
+Future catalog/play, desktop and web: [arqyv-gs2pack.md](arqyv-gs2pack.md) (planned product shape).
 
 ---
 
@@ -533,7 +533,7 @@ Aux / main memory layout for //e family — platform-composed, not user-pluggabl
 | `host.open.gs2-macos-drop` | macOS Open → existing instance | Complete | macOS | Installed `.app` | `DROP_FILE` | manual | [ProtocolHandlers.md](ProtocolHandlers.md) |
 | `host.open.gs2-windows-argv` | Windows double-click → argv | Complete | win | — | Second instance | manual | [ProtocolHandlers.md](ProtocolHandlers.md) |
 | `host.open.gs2-associations` | Full OS file-type registration | Planned | all | — | — | — | Roadmap 1.0 |
-| `host.url.gssquared-scheme` | `gssquared:` URL handler | Planned | all | — | — | — | Spec in ProtocolHandlers |
+| `host.url.gssquared-scheme` | `gssquared:` pack download | Partial | macOS, win, linux | — | Confirm host and filename, then the pack boots | manual | Upload and multi-file `.gs2` URLs are later. Web uses `fetch()`. |
 
 ---
 

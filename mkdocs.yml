@@ -11,6 +11,7 @@ nav:
   - User Guide:
     - Getting Started: index.md
     - Feature catalog: Features.md
+    - Test Suites: Tests.md
     - Menus: Menus.md
     - Selecting a System: Select.md
     - Command Line: CommandLine.md
@@ -27,6 +28,7 @@ nav:
     - Play in the Browser: Web.md
     - Config Editor: ConfigEditor.md
     - Writing Config Files: ConfigFiles.md
+    - GS2 Packs: Gs2Pack.md
     - File Types & URLs: ProtocolHandlers.md
     - Using the Debugger: UsingTheDebugger.md
 

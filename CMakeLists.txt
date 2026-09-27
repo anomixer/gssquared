@@ -525,7 +525,7 @@ add_library(gs2_ui src/ui/AssetAtlas.cpp src/ui/Container.cpp src/ui/DiskII_Butt
     src/ui/FadeButton.cpp src/ui/Clipboard.cpp src/ui/ScreenshotWriter.cpp src/ui/TextInput.cpp src/ui/SelectSystem.cpp src/ui/SystemButton.cpp
     src/ui/LabeledButton.cpp src/ui/FaceButton.cpp src/ui/FadeContainer.cpp src/ui/SlotButton.cpp src/ui/StatusMessage.cpp src/ui/DrivesHUD.cpp
     src/ui/SpeedSelect.cpp src/ui/HoverControls.cpp src/ui/DisplaySelect.cpp src/ui/DrivesOSD.cpp src/ui/HD20SC_Button.cpp
-    src/ui/DirtyDiskSave.cpp src/ui/QuitModal.cpp src/ui/LaunchConfigModal.cpp src/ui/ScrollBar.cpp src/ui/WrapContainer.cpp
+    src/ui/DirtyDiskSave.cpp src/ui/QuitModal.cpp src/ui/LaunchConfigModal.cpp src/ui/PackDiskBrowser.cpp src/ui/ScrollBar.cpp src/ui/WrapContainer.cpp
     src/ui/StorageButtonFactory.cpp src/ui/SlotsPanel.cpp src/ui/SystemBadge.cpp src/ui/ConfigSelectors.cpp
     src/ui/EditSystem.cpp
     src/ui/SerialPortButton.cpp src/ui/SerialPortsOSD.cpp
@@ -621,6 +621,8 @@ add_library(gs2_systemconfig
     src/util/ConfigDraft.cpp
     src/util/SystemSettings.cpp
     src/util/uuid.cpp
+    src/util/Gs2Pack.cpp
+    src/util/Gs2Url.cpp
 )
 target_link_libraries(gs2_systemconfig PUBLIC gs2_paths gs2_device_info gs2_toml)
 
@@ -797,6 +799,7 @@ if(NOT EMSCRIPTEN)
     add_subdirectory(apps/mousebugtest)
 
     add_subdirectory(apps/systemconfigtest)
+    add_subdirectory(apps/gs2packtest)
 
     add_subdirectory(apps/ssgputexttest)
 endif()
@@ -808,6 +811,8 @@ if(APPLE)
     add_library(platform_specific
         src/platform-specific/macos/menu.mm
         src/platform-specific/macos/gs2_save_dialog.mm
+        src/platform-specific/macos/HttpsGet.mm
+        src/platform-specific/HttpsBody.cpp
     )
 
     target_include_directories(platform_specific PUBLIC
@@ -844,6 +849,12 @@ if((UNIX AND NOT APPLE) OR EMSCRIPTEN)
     set(GS2_USE_IMGUI ON)
 
     set(GS2_PLATFORM_SPECIFIC_SOURCES src/platform-specific/linux/menu.cpp)
+    if(NOT EMSCRIPTEN)
+        find_package(CURL REQUIRED)
+        list(APPEND GS2_PLATFORM_SPECIFIC_SOURCES
+            src/platform-specific/linux/HttpsGet.cpp
+            src/platform-specific/HttpsBody.cpp)
+    endif()
     if(EMSCRIPTEN)
         # Browser file picker used in place of SDL_ShowOpenFileDialog.
         list(APPEND GS2_PLATFORM_SPECIFIC_SOURCES
@@ -860,15 +871,32 @@ if((UNIX AND NOT APPLE) OR EMSCRIPTEN)
         gs2_imgui
         gs2_util
     )
+    if(NOT EMSCRIPTEN)
+        target_link_libraries(platform_specific PRIVATE CURL::libcurl)
+    endif()
 endif()
 
 if(WIN32)
-    add_library(platform_specific src/platform-specific/windows/menu.cpp)
+    add_library(platform_specific
+        src/platform-specific/windows/menu.cpp
+        src/platform-specific/windows/HttpsGet.cpp
+        src/platform-specific/HttpsBody.cpp
+    )
 
     target_link_libraries(platform_specific PRIVATE
         ${GS2_SDL3}
         gs2_util
+        winhttp
     )
+endif()
+
+if(NOT EMSCRIPTEN)
+    cmake_policy(SET CMP0079 NEW)
+    target_sources(GSSquared PRIVATE src/ui/PackFetchModal.cpp)
+    target_link_libraries(gs2packtest PRIVATE platform_specific)
+    if(APPLE)
+        target_link_libraries(gs2packtest PRIVATE "-framework Foundation" "-framework Cocoa")
+    endif()
 endif()
 
 if(GS2_USE_IMGUI)
