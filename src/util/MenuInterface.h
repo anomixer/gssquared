@@ -56,6 +56,8 @@ public:
 	void editCopyScreen();
 	void editPasteText();
 	void fileSaveScreenshot();
+	void fileSaveCollection();
+	bool canSaveCollection() const;
 	void toggleMountDrivers();
 	void newDiskImage(int menu_code);
 	void openDebugWindow();
