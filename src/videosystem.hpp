@@ -167,9 +167,6 @@ public:
 
     void set_window_title(const char *title);
     void window_resize(const SDL_Event &event);
-    // Recompute the target rect from the renderer's real pixel output size
-    // (not window points), so the emulator image is sized for the high-DPI backbuffer.
-    void update_target_from_output();
     void toggle_fullscreen();
     void set_window_fullscreen(display_fullscreen_mode_t mode);
     display_fullscreen_mode_t get_window_fullscreen();
