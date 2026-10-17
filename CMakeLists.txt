@@ -334,6 +334,10 @@ target_include_directories(gs2_headers
     INTERFACE ${PROJECT_BINARY_DIR}/generated
     INTERFACE ${CMAKE_BINARY_DIR}/cfg
 )
+# Debug builds append " [Debug]" to window titles (see gs2_window_title).
+target_compile_definitions(gs2_headers INTERFACE
+    $<$<CONFIG:Debug>:GS2_DEBUG_BUILD>
+)
 
 # all following targets will link to SDL3
 link_libraries(gs2_headers ${GS2_SDL3} ${GS2_SDL3_NET})
@@ -541,6 +545,10 @@ add_library(gs2_ntsc
     src/display/OEVector.cpp
     src/display/filters.cpp
     src/display/shaders/GpuShaderLoader.cpp
+    src/display/shaders/GpuFragmentPass.cpp
+    src/display/NtscGpu.cpp
+    src/display/GsCompositeGpu.cpp
+    src/display/PhosphorPersist.cpp
 )
 
 target_link_libraries(gs2_displaypp PUBLIC gs2_ntsc)
@@ -759,6 +767,8 @@ if(NOT EMSCRIPTEN)
     #add_subdirectory(apps/denibblizer)
     add_subdirectory(apps/vgatext)
 
+    add_subdirectory(apps/ntsc1120)
+
     add_subdirectory(apps/ssppu)
 
     add_subdirectory(apps/diskid)
@@ -784,6 +794,7 @@ if(NOT EMSCRIPTEN)
 
     #add_subdirectory(apps/dpp)
     add_subdirectory(apps/vpp)
+    add_subdirectory(apps/vsgtest)
 
     add_subdirectory(apps/iieromcsum)
 
