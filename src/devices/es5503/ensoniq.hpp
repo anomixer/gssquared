@@ -40,8 +40,10 @@ public:
     uint8_t read(uint8_t offset);
     void write(uint8_t offset, uint8_t data);
     
-    // Generate audio samples
-    void generate_samples(int16_t *buffer, int num_samples);
+    // Generate audio samples. The oscillator sum is averaged over N+2 DAC slots,
+    // sys_volume ($C03C, 0..15) only cuts that (20 ms glide), then a fixed
+    // +36 dB makeup is applied. Default 6 is a cold AudioSystem.
+    void generate_samples(int16_t *buffer, int num_samples, uint8_t sys_volume = 6);
     
     // Set callbacks
     void set_irq_callback(std::function<void(bool)> callback) { m_irq_callback = callback; }
@@ -109,4 +111,7 @@ public:
     uint8_t get_rege0() { return m_rege0; }
     uint8_t get_rege1() { return m_rege1; /* m_oscsenabled; */ }
     uint8_t get_oscsenabled() { return m_oscsenabled; }
+
+    private:
+    float m_vol_gain = -1.0f;   // current linear gain 0..1; <0 = snap on first use
 };
