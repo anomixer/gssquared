@@ -367,6 +367,8 @@ add_library(gs2_devices_speaker     src/devices/speaker/speaker.cpp )
 
 add_library(gs2_devices_memexp     src/devices/memoryexpansion/memexp.cpp )
 
+add_library(gs2_devices_ramworks   src/devices/ramworks/ramworks.cpp )
+
 add_library(gs2_devices_parallel     src/devices/parallel/parallel.cpp )
 target_link_libraries(gs2_devices_parallel PUBLIC gs2_serial_devices)
 
@@ -587,6 +589,7 @@ set(GS2_DEVICE_REGISTRY_LIBS
     gs2_devices_vidhd
     gs2_devices_game
     gs2_devices_memexp
+    gs2_devices_ramworks
     gs2_devices_parallel
     gs2_devices_videx
     gs2_devices_pdblock2
@@ -720,6 +723,7 @@ target_link_libraries(GSSquared
     gs2_devices_vidhd
     gs2_devices_game
     gs2_devices_memexp
+    gs2_devices_ramworks
     gs2_devices_parallel
     gs2_devices_videx
     gs2_devices_pdblock2

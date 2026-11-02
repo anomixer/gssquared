@@ -75,6 +75,10 @@ void MenuInterface::toggleSleepMode() {
 	gs2_app_values.sleep_mode = !gs2_app_values.sleep_mode;
 }
 
+void MenuInterface::togglePauseWhenMinimized() {
+	SystemSettings::instance().toggle_pause_when_minimized();
+}
+
 void MenuInterface::toggleAudioDecorrelation() {
 	if (computer_ && computer_->audio_system) computer_->audio_system->toggle_decorrelation();
 }
@@ -180,6 +184,10 @@ int MenuInterface::getCurrentMonitor() {
 
 bool MenuInterface::getSleepMode() {
 	return gs2_app_values.sleep_mode;
+}
+
+bool MenuInterface::getPauseWhenMinimized() {
+	return SystemSettings::instance().pause_when_minimized();
 }
 
 bool MenuInterface::getAudioDecorrelation() {
