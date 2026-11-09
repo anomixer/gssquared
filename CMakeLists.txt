@@ -1531,6 +1531,9 @@ if(EMSCRIPTEN)
     set_target_properties(GSSquared PROPERTIES SUFFIX ".html")
     set_property(TARGET GSSquared APPEND PROPERTY
         LINK_DEPENDS "${CMAKE_SOURCE_DIR}/assets/web/shell.html")
+    # The page registers this beside itself on hosts without the isolation headers.
+    configure_file(${CMAKE_SOURCE_DIR}/assets/web/isolation-worker.js
+        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/isolation-worker.js COPYONLY)
 
     # Copy web shell support assets to the deploy root.
     add_custom_command(TARGET GSSquared POST_BUILD
