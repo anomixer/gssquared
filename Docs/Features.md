@@ -201,7 +201,8 @@ Native menus: [Menus.md](Menus.md). Control Panel / hover strip / drives: [OSD.m
 |------|---------|--------|-------|---------------|--------|------------|-------|
 | `workflow.docs.online` | Online Documentation | Complete | all | Network | Browser opens docs | manual | [Menus.md](Menus.md) |
 | `workflow.docs.donate` | Donate link | Complete | all | Network | Browser opens | manual | |
-| `workflow.docs.check-updates` | Check For Updates | Complete | all | Network | Releases page | manual | Docs menu |
+| `workflow.docs.check-updates` | Check For Updates | Complete | all | Network | Updates page | manual | Docs menu |
+| `workflow.docs.notify-update` | New-version button on System Select | Complete | macOS, win, linux | Network; behind latest release | Button under + New / Launch / Edit...; click opens HTML updates page | manual | Fail-closed; not on web. [NotifyUpdate.md](NotifyUpdate.md) |
 
 ---
 
@@ -515,7 +516,7 @@ Main versus auxiliary mapping for the IIe family lives on `MMU_IIe2`. It is not 
 
 | `id` | feature | status | hosts | preconditions | verify | automation | notes |
 |------|---------|--------|-------|---------------|--------|------------|-------|
-| `device.scc.printer-port` | GS printer on serial | Partial | all | IIgs | Print to file | manual | Not full printer |
+| `device.scc.printer-port` | GS printer on serial | Partial | all | IIgs | `device = "printer"` | manual | Capture + gs2print ticket; not ImageWriter |
 | `device.scc.modem-b` | Modem on port B | Complete | macOS, win, linux | IIgs | Hayes TCP | manual | Absent on web |
 
 ### Motherboard: RTC / PRAM (`rtc_pram`)

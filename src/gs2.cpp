@@ -48,6 +48,7 @@
 #ifndef __EMSCRIPTEN__
 #include "ui/PackFetchModal.hpp"
 #include "platform-specific/HttpsGet.hpp"
+#include "util/UpdateCheck.hpp"
 #endif
 #if defined(__EMSCRIPTEN__)
 #include <emscripten.h>
@@ -783,6 +784,7 @@ struct GS2AppState {
     modal_stack pack_fetch_stack;
     std::unique_ptr<PackFetchModal_t> pack_fetch;
     std::string pending_pack_url;
+    UpdateCheck update_check;
 #else
     /** Power-off of an auto-launched pack waits for the Collection PUT. */
     bool web_exit_after_save = false;
@@ -2704,6 +2706,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
                 finish_pack_fetch(state);
                 return SDL_APP_CONTINUE;
             }
+        }
+        state->update_check.start();
+        state->update_check.poll();
+        if (state->update_check.available()) {
+            state->select_system->set_update_visible(true);
         }
 #endif
         if (state->select_system->update()) {
