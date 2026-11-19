@@ -245,6 +245,19 @@ runweb.bat
 * **相關文件重點**：Second Sight mode 03h 是 `80x25`、`9x16` text，原生顯示區為 `720x400`；這是內容 source aspect，不是整個 GSSquared canvas 的 layout aspect。
 * **驗證**：WASM Ninja build 成功；localhost 大視窗、SS canvas 上限、menu bar 下方起始位置與關閉 SS 後恢復 selector layout 均納入測試流程。
 
+### 4.19 近期上游同步與衝突維護 (Upstream Sync & Conflict Resolution)
+
+* **2026-10-18（Upstream 1.1 NTSC Shader & UI 增強）**：
+  * **衝突修復**：`SystemButton.cpp` 與 `videosystem.cpp`。保留 upstream 右鍵編輯提示與動態視窗標題，同時維持 fork 的黑色毛玻璃底框與 WASM 容器自適應視窗初始化（`SDL_CreateWindow(..., 0, 0)`）。
+  * **重複宣告修正**：修復 `videosystem.hpp` 中因 merge 造成的 `update_target_from_output()` 重複宣告編譯錯誤。
+* **2026-11-09（Web Audio Buffering & Static Hosting）**：
+  * **衝突修復**：`soundglu.cpp`。全面接軌上游 PR #228 動態設備 callback frame 深度管理，消除 WebAudio 延遲與斷音。
+  * **靜態主機支援**：引入 `isolation-worker.js`，並保留 GitHub Pages 專屬的 CI/CD 工作流程與玻璃擬態 shell。
+* **2026-11-18（Update Notification & Serial Printer）**：
+  * **衝突修復**：`SelectSystem.cpp`。上游新增 `Click to get new version` 檢查更新按鈕，調整動作列位置；fork 配合將下方說明文字座標 `ui_ctx.description_y` 動態下移，避免與更新按鈕重疊。
+* **2026-11-19（Mockingboard C SSI-263 Speech & Synth5）**：
+  * **衝突修復**：`mb2.cpp`。上游引進 Mockingboard C 語音晶片（SSI-263）與 Synth5 擬真合成器，改採視訊週期 `clock->get_vid_cycles()` 精準控制 frame 步進。移除過時的寫死緩衝區清空邏輯，完整整合最新的語音混音管線與動態音訊保護。
+
 ---
 
 ## 5. 後續維護與開發守則 (Rules for Agents & Contributors)
